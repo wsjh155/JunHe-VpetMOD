@@ -1,0 +1,23 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+.vs/
+.idea/
+
+# NuGet
+*.nuget.props
+*.nuget.targets
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Mod 备份/临时文件
+*.bak
+*.bak_*
+*~
