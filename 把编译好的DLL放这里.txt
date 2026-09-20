@@ -1,3 +1,3 @@
 把编译生成的插件 DLL 放到本目录（plugin/），例如:
-  VPet.Plugin.OnlineInteraction.dll
+  VPet.Plugin.DayTrip.dll
 游戏即可识别本 Mod。
