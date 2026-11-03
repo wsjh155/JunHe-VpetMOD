@@ -87,17 +87,21 @@ namespace VPet.Plugin.OnlineInteraction
             return true;
         }
 
-        /// <summary>结束所有使用该配置目录的浏览器进程（主进程整树优先），返回实际处理数</summary>
+        /// <summary>结束所有使用该配置目录的浏览器主进程（只杀主进程，不递归），返回实际处理数</summary>
         public static int KillAll(string profileDir, out bool anyMain)
         {
             var found = Find(profileDir);
             anyMain = found.Any(x => x.IsMain);
 
             int killed = 0;
-            // 先杀主进程：Kill(true) 会带走渲染/GPU 等子进程，避免它们继续持有配置目录
-            foreach (var b in found.OrderByDescending(x => x.IsMain))
+            // 只杀主进程（命令行不含 --type= 的那个）。
+            // Chromium 主进程退出后会自行回收自己的 renderer/GPU 子树，不会牵连其它
+            // --user-data-dir 的 Edge 实例（它们有各自独立的主进程）。
+            // 严禁 Kill(true) 递归杀树：Edge 在多开实例之间共享的 GPU / 网络服务进程依附于
+            // 主进程，递归杀会把共享进程一起干掉，导致整个浏览器崩溃、用户其它网页（如 AstrBot 面板）一起丢失。
+            foreach (var b in found.Where(x => x.IsMain))
             {
-                if (KillTree(b.Pid)) killed++;
+                if (KillOne(b.Pid, profileDir)) killed++;
             }
             return killed;
         }
@@ -219,17 +223,20 @@ namespace VPet.Plugin.OnlineInteraction
             return false;
         }
 
-        private static bool KillTree(int pid)
+        /// <summary>仅结束单个云桥主进程（不递归杀树）。杀前二次校验命令行，防止 PID 被系统复用后误伤正常浏览器。</summary>
+        private static bool KillOne(int pid, string profileDir)
         {
             try
             {
                 using (var p = Process.GetProcessById(pid))
                 {
                     string name = p.ProcessName.ToLowerInvariant();
-                    // 防止 PID 被系统复用后误杀别的程序
                     if (name != "msedge" && name != "chrome") return false;
-                    try { p.Kill(true); }
-                    catch { try { p.Kill(); } catch { return false; } }
+                    // PID 复用复检：再次确认命令行仍指向云桥专用配置目录，避免误杀用户正常 Edge
+                    string cl = GetCommandLine(pid);
+                    if (string.IsNullOrEmpty(cl) || !ContainsPath(cl, profileDir)) return false;
+                    try { p.Kill(); }   // 仅本进程，不递归杀树
+                    catch { return false; }
                     return true;
                 }
             }
