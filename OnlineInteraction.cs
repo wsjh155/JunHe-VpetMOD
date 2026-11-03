@@ -185,6 +185,76 @@ public class OnlineInteraction : MainPlugin
     private static string _visitorError;
     internal static string GetVisitorError() => _visitorError;
 
+    /// <summary>
+    /// 读访客表窗口里游戏自带的「固定 ID」(形如 V255082)。
+    /// 这个值是游戏自己向 report.exlb.net 申请的短号, 界面上就显示在 ID 下面,
+    /// 比 1097752433211288583 这种 Steam 大厅号好记, 也正是游戏「加入访客表」接受的输入。
+    /// 未开房 / 还没取到 / 取失败(ERROR) 时返回空串。
+    /// </summary>
+    internal static string GetFixedId(IMainWindow mw)
+    {
+        try
+        {
+            var field = mw.GetType().GetField("winMutiPlayer", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+            var cur = field?.GetValue(mw);
+            if (cur == null) return "";
+            var f = cur.GetType().GetField("lbLFix", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+            var tb = f?.GetValue(cur) as System.Windows.Controls.TextBox;
+            var s = tb?.Text?.Trim() ?? "";
+            if (s.Length == 0) return "";
+            if (s.Equals("ERROR", StringComparison.OrdinalIgnoreCase)) return "";
+            // 游戏 XAML 里 "固定 ID: " 是标签, TextBox 里可能只有数字, 统一补成 V 开头
+            if (s[0] != 'V' && s[0] != 'v') s = "V" + s;
+            return s;
+        }
+        catch { return ""; }
+    }
+
+    /// <summary>当前访客表是不是我自己开的 (null=读不到)</summary>
+    internal static bool? GetVisitorTableIsHost(IMainWindow mw)
+    {
+        try
+        {
+            var field = mw.GetType().GetField("winMutiPlayer", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+            var cur = field?.GetValue(mw);
+            if (cur == null) return null;
+            var p = cur.GetType().GetProperty("IsHost", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (p == null) return null;
+            return Convert.ToBoolean(p.GetValue(cur) ?? false);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// 固定 ID → Steam 大厅号。走游戏自己的接口
+    /// GET https://report.exlb.net/VPET/SteamRoomGetLobbyID?hoststeamid=..&amp;fixid=..&amp;lobbyid=0&amp;checkkey=..
+    /// (即 MainWindow.GetVPetRoom, 带 Steam 认证票据), 与游戏内「按固定 ID 加入」完全一致。
+    /// 必须在后台线程调用: 内部 await 需要线程池上下文, 在 UI 线程同步等待会死锁。
+    /// </summary>
+    internal static ulong ResolveFixedId(IMainWindow mw, int fixId)
+    {
+        var m = mw.GetType().GetMethod("GetVPetRoom", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        if (m == null) throw new InvalidOperationException("找不到游戏方法 GetVPetRoom（版本不匹配？）");
+        object r;
+        try { r = m.Invoke(mw, new object[] { "SteamRoomGetLobbyID", fixId, 0UL }); }
+        catch (TargetInvocationException ex) { throw new InvalidOperationException(ex.InnerException?.Message ?? ex.Message); }
+        var task = r as System.Threading.Tasks.Task<string>;
+        if (task == null) throw new InvalidOperationException("GetVPetRoom 返回类型异常");
+        string s = task.GetAwaiter().GetResult();
+        if (ulong.TryParse(s, out var lid) && lid > 1860000UL) return lid;
+        throw new InvalidOperationException("该固定 ID 查不到对应房间" + (string.IsNullOrEmpty(s) ? "" : "（返回 " + s.Trim() + "）"));
+    }
+
+    /// <summary>从 "V255082" / "255082" 里取出数字, 非法返回 false</summary>
+    internal static bool TryParseFixedId(string raw, out int fixId)
+    {
+        fixId = 0;
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+        var s = raw.Trim();
+        if (s.Length > 0 && (s[0] == 'V' || s[0] == 'v')) s = s.Substring(1);
+        return int.TryParse(s, out fixId) && fixId > 0;
+    }
+
     /// <summary>本账号当前是否打开了访客表</summary>
     internal static bool IsVisitorTableOpen(IMainWindow mw)
     {

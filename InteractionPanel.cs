@@ -541,74 +541,87 @@ public class InteractionPanel : UserControl
         };
         inner.Children.Add(_roomStatusText);
 
-        // ── ① Steam 大厅房间 ──
-        inner.Children.Add(GroupLabel("开放中的访客表 · Steam 大厅"));
-        _roomList = CleanList(null);
-        inner.Children.Add(new ScrollViewer
-        {
-            Height = 170,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = _roomList
-        });
-
-        // ── ② 云端房间 ──
-        var cloudHead = new DockPanel { Margin = new Thickness(0, 12, 0, 2) };
-        var cloudTitle = GroupLabel("云端房间 · 云桥");
-        cloudTitle.Margin = new Thickness(0);
-        DockPanel.SetDock(cloudTitle, Dock.Left);
-        cloudHead.Children.Add(cloudTitle);
+        // ── 开放中的访客表 (Steam P2P 发现的 + 云桥登记的, 合并成一个列表) ──
+        var roomHead = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
+        var roomTitle = GroupLabel("开放中的访客表");
+        roomTitle.Margin = new Thickness(0);
+        DockPanel.SetDock(roomTitle, Dock.Left);
+        roomHead.Children.Add(roomTitle);
         _cloudStatus = new TextBlock
         {
-            Text = "等待云桥网页推送…", Foreground = MutedBrush, FontSize = 11,
+            Text = "", Foreground = MutedBrush, FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
             TextTrimming = TextTrimming.CharacterEllipsis
         };
         DockPanel.SetDock(_cloudStatus, Dock.Right);
-        cloudHead.Children.Add(_cloudStatus);
-        inner.Children.Add(cloudHead);
+        roomHead.Children.Add(_cloudStatus);
+        inner.Children.Add(roomHead);
 
-        _cloudPanel = new WrapPanel { Orientation = Orientation.Horizontal };
-        _cloudScroll = new ScrollViewer
+        _roomList = CleanList(null);
+        inner.Children.Add(new ScrollViewer
         {
-            Height = 132,
+            Height = 210,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = _cloudPanel
-        };
-        inner.Children.Add(_cloudScroll);
+            Content = _roomList
+        });
 
-        // ── ③ 等级排行榜(可折叠) ──
+        // ── ③ 排行榜: 等级榜 + 金钱榜 (都可折叠) ──
         _boardStatus = new TextBlock { Text = "", FontSize = 11, Foreground = MutedBrush, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
         var boardHead = new StackPanel { Orientation = Orientation.Horizontal };
         boardHead.Children.Add(new TextBlock { Text = "等级排行榜", FontSize = 12, FontWeight = FontWeights.Bold, Foreground = TextBrush, VerticalAlignment = VerticalAlignment.Center });
         boardHead.Children.Add(_boardStatus);
 
         _boardPanel = new StackPanel();
-        var boardScroll = new ScrollViewer
-        {
-            Height = 150,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = _boardPanel
-        };
-        var boardExpander = new Expander
+        inner.Children.Add(new Expander
         {
             Header = boardHead,
             IsExpanded = true,
             Margin = new Thickness(0, 10, 0, 0),
             Foreground = TextBrush,
-            Content = boardScroll
-        };
-        inner.Children.Add(boardExpander);
+            Content = new ScrollViewer
+            {
+                Height = 130,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = _boardPanel
+            }
+        });
 
-        // ── ④ 按大厅ID加入 ──
+        _moneyStatus = new TextBlock { Text = "", FontSize = 11, Foreground = MutedBrush, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0) };
+        var moneyHead = new StackPanel { Orientation = Orientation.Horizontal };
+        moneyHead.Children.Add(new TextBlock { Text = "金钱排行榜", FontSize = 12, FontWeight = FontWeights.Bold, Foreground = TextBrush, VerticalAlignment = VerticalAlignment.Center });
+        moneyHead.Children.Add(_moneyStatus);
+
+        _moneyPanel = new StackPanel();
+        inner.Children.Add(new Expander
+        {
+            Header = moneyHead,
+            IsExpanded = false,
+            Margin = new Thickness(0, 6, 0, 0),
+            Foreground = TextBrush,
+            Content = new ScrollViewer
+            {
+                Height = 130,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = _moneyPanel
+            }
+        });
+
+        // ── ④ 按固定 ID 加入 ──
         var joinRow = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
-        joinRow.Children.Add(new TextBlock { Text = "按大厅ID加入:", FontSize = 13, Foreground = TextBrush, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
-        _roomIdInput = new TextBox { FontSize = 13, Padding = new Thickness(6, 4, 6, 4), Width = 200, Margin = new Thickness(0, 0, 8, 0) };
+        joinRow.Children.Add(new TextBlock { Text = "按固定ID加入:", FontSize = 13, Foreground = TextBrush, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+        _roomIdInput = new TextBox { FontSize = 13, Padding = new Thickness(6, 4, 6, 4), Width = 160, Margin = new Thickness(0, 0, 8, 0), ToolTip = "填 V255082 这样的固定 ID，或完整 Steam 大厅号" };
         joinRow.Children.Add(_roomIdInput);
         joinRow.Children.Add(SmallBtn("加入", DoJoinRoomById));
+        joinRow.Children.Add(new TextBlock
+        {
+            Text = "（固定 ID 就是访客表窗口左上角那个 V 开头的号）",
+            FontSize = 11, Foreground = MutedBrush,
+            VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0, 0, 0)
+        });
         inner.Children.Add(joinRow);
 
         // ── 底部说明 ──
@@ -704,15 +717,15 @@ public class InteractionPanel : UserControl
 
     // ───────── 云端数据展示区 (已合并进「联机大厅」页, 数据由云桥网页推送) ─────────
     private TextBlock _cloudStatus;
-    private WrapPanel _cloudPanel;
-    private ScrollViewer _cloudScroll;
     private StackPanel _boardPanel;
     private TextBlock _boardStatus;
+    private StackPanel _moneyPanel;
+    private TextBlock _moneyStatus;
 
     private void OnCloudRoomsChanged()
     {
-        if (_cloudPanel == null) return;
-        _plugin.MW?.Main?.Dispatcher?.Invoke(RenderCloudRooms);
+        if (_roomList == null) return;
+        _plugin.MW?.Main?.Dispatcher?.Invoke(RefreshRoomList);
     }
 
     private void OnCloudBoardChanged()
@@ -723,27 +736,44 @@ public class InteractionPanel : UserControl
 
     private void RenderBoard()
     {
-        if (_boardPanel == null) return;
-        _boardPanel.Children.Clear();
         var board = _plugin.Cloud?.Board ?? new List<CloudEntry>();
+
+        // 等级榜: 等级 → 转生 → 金钱
+        RenderOneBoard(_boardPanel, _boardStatus, board,
+            e => "Lv " + e.level + (e.level_max > 0 ? " (" + e.level_max + " 转)" : "") + " ｜ " + FormatMoney(e.money),
+            b => b.OrderByDescending(e => e.level).ThenByDescending(e => e.level_max).ThenByDescending(e => e.money).ToList(),
+            "登录云桥网页后，你的等级/转生/金钱会自动上榜。");
+
+        // 金钱榜: 金钱 → 等级
+        RenderOneBoard(_moneyPanel, _moneyStatus, board,
+            e => FormatMoney(e.money) + " ｜ Lv " + e.level + (e.level_max > 0 ? " (" + e.level_max + " 转)" : ""),
+            b => b.OrderByDescending(e => e.money).ThenByDescending(e => e.level).ToList(),
+            "登录云桥网页后，你的金钱会自动上榜。");
+    }
+
+    private void RenderOneBoard(StackPanel panel, TextBlock status, List<CloudEntry> board,
+        Func<CloudEntry, string> rightText, Func<List<CloudEntry>, List<CloudEntry>> sort, string emptyHint)
+    {
+        if (panel == null) return;
+        panel.Children.Clear();
         if (board.Count == 0)
         {
-            if (_boardStatus != null) _boardStatus.Text = "暂无数据";
-            _boardPanel.Children.Add(new TextBlock
+            if (status != null) status.Text = "暂无数据";
+            panel.Children.Add(new TextBlock
             {
-                Text = "登录云桥网页后，你的等级/转生/金钱会自动上榜。",
+                Text = emptyHint,
                 FontSize = 12, Foreground = MutedBrush, Margin = new Thickness(2, 4, 0, 0)
             });
             return;
         }
-        if (_boardStatus != null) _boardStatus.Text = $"共 {board.Count} 位玩家";
+        if (status != null) status.Text = "共 " + board.Count + " 位玩家";
         int rank = 1;
-        foreach (var e in board.Take(20))
+        foreach (var e in sort(board).Take(20))
         {
             var row = new DockPanel { Margin = new Thickness(0, 1, 0, 1) };
             var left = new TextBlock
             {
-                Text = $"#{rank}  {e.nickname}{(string.IsNullOrEmpty(e.pet_name) ? "" : " · " + e.pet_name)}",
+                Text = "#" + rank + "  " + e.nickname + (string.IsNullOrEmpty(e.pet_name) ? "" : " · " + e.pet_name),
                 FontSize = 12, Foreground = TextBrush, VerticalAlignment = VerticalAlignment.Center,
                 TextTrimming = TextTrimming.CharacterEllipsis
             };
@@ -751,13 +781,13 @@ public class InteractionPanel : UserControl
             row.Children.Add(left);
             var right = new TextBlock
             {
-                Text = $"Lv {e.level}" + (e.level_max > 0 ? $" ({e.level_max} 转)" : "") + $" ｜ {FormatMoney(e.money)}",
+                Text = rightText(e),
                 FontSize = 12, Foreground = MutedBrush, HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center
             };
             DockPanel.SetDock(right, Dock.Right);
             row.Children.Add(right);
-            _boardPanel.Children.Add(row);
+            panel.Children.Add(row);
             rank++;
         }
     }
@@ -769,42 +799,24 @@ public class InteractionPanel : UserControl
         return m.ToString();
     }
 
+    /// <summary>合并后的房间条目: 同一个访客表可能同时被 Steam P2P 发现、又在云桥登记过</summary>
+    private class MergedRoom
+    {
+        public ulong LobbyId;
+        public string FixId = "";
+        public string Name = "";
+        public string HostName = "";
+        public ulong HostId;
+        public int Players;
+        public bool IsCurrent;
+        public bool FromP2P;
+        public bool FromCloud;
+    }
+
+    /// <summary>房间列表统一由 RefreshRoomList 渲染(两个来源合并), 这里只做兼容入口</summary>
     private void RenderCloudRooms()
     {
-        if (_cloudPanel == null) return;
-        _cloudPanel.Children.Clear();
-        var rooms = _plugin.Cloud?.Rooms ?? new List<CloudRoom>();
-        if (rooms.Count == 0)
-        {
-            _cloudStatus.Text = "暂无开放房间。登录云桥网页并开房后，这里会显示所有开放中的访客表。";
-            return;
-        }
-        _cloudStatus.Text = $"当前共 {rooms.Count} 个开放房间";
-        foreach (var r in rooms)
-        {
-            var c = new Border
-            {
-                Background = CardBrush, CornerRadius = R8, BorderBrush = BdrBrush,
-                BorderThickness = new Thickness(1), Margin = new Thickness(4),
-                Padding = new Thickness(10, 8, 10, 8), Width = 200
-            };
-            var sp = new StackPanel();
-            sp.Children.Add(new TextBlock { Text = (r.host_name ?? "某人") + " 的访客表", FontWeight = FontWeights.Bold, FontSize = 13, Foreground = TextBrush });
-            if (!string.IsNullOrEmpty(r.pet_name))
-                sp.Children.Add(new TextBlock { Text = "宠物: " + r.pet_name, FontSize = 12, Foreground = MutedBrush, Margin = new Thickness(0, 2, 0, 0) });
-            if (!string.IsNullOrEmpty(r.region))
-                sp.Children.Add(new TextBlock { Text = "地区: " + r.region, FontSize = 12, Foreground = MutedBrush });
-            sp.Children.Add(new TextBlock { Text = "桌号: " + r.lobby_id, FontSize = 11, Foreground = MutedBrush, Margin = new Thickness(0, 2, 0, 0) });
-            var join = SmallBtn("加入", () =>
-            {
-                if (ulong.TryParse(r.lobby_id, out var id) && id != 0)
-                    OnlineInteraction.JoinVisitorTable(_plugin.MW, id);
-            });
-            join.Margin = new Thickness(0, 6, 0, 0);
-            sp.Children.Add(join);
-            c.Child = sp;
-            _cloudPanel.Children.Add(c);
-        }
+        RefreshRoomList();
     }
 
     internal void RefreshFriendList()
@@ -858,7 +870,8 @@ public class InteractionPanel : UserControl
     // v2 联机大厅 (桌宠访客表)
     private void RefreshRoomList()
     {
-        try { OnlineInteraction.DumpReflectionDiag(_plugin.MW); } catch { }
+        // 只在反射类型还没定位到时才做全程序集扫描(那个诊断很重, 不能每次刷新都跑)
+        try { if (OnlineInteraction.GetWmpType(_plugin.MW) == null) OnlineInteraction.DumpReflectionDiag(_plugin.MW); } catch { }
         try { UpdateVisitorState(); } catch { }
         if (_myTableText != null)
         {
@@ -866,7 +879,12 @@ public class InteractionPanel : UserControl
             if (info.HasValue)
             {
                 _myLobbyId = info.Value.lobbyId;
-                _myTableText.Text = "我的桌号: " + info.Value.lobbyId + "  (" + info.Value.members + " 人)";
+                // 用游戏自带的固定 ID (V255082) 代替 Steam 大厅号, 好记也好转发
+                string fix = OnlineInteraction.GetFixedId(_plugin.MW);
+                bool? isHost = OnlineInteraction.GetVisitorTableIsHost(_plugin.MW);
+                string role = isHost == true ? "（我是房主）" : (isHost == false ? "（我在别人房间）" : "");
+                string idPart = string.IsNullOrEmpty(fix) ? "固定 ID 加载中…" : ("房间 " + fix);
+                _myTableText.Text = idPart + " · " + info.Value.members + " 人" + role;
             }
             else
             {
@@ -888,31 +906,100 @@ public class InteractionPanel : UserControl
             if (_roomStatusText != null) _roomStatusText.Text = "未连接 Steam";
             return;
         }
-        bool canAdmin = AdminConfig.CanShowAdminUI(_plugin.Lobby?.SelfId ?? 0UL);
-        var rooms = lobby.GetVisibleRooms();
-        if (rooms.Count == 0)
+        bool canAdmin = AdminConfig.CanShowAdminUI(lobby.SelfId);
+
+        // ── 合并两个来源: Steam P2P 发现的房间 + 云桥登记的房间 ──
+        var merged = new List<MergedRoom>();
+        var byId = new Dictionary<ulong, MergedRoom>();
+        foreach (var r in lobby.GetVisibleRooms())
         {
-            _roomList.Items.Add("还没发现其他 mod 玩家的访客表。点「刷新大厅」, 并确认对方已打开访客表 (双方都装了本 mod)。");
+            var m = new MergedRoom
+            {
+                LobbyId = r.Id, Name = r.Name, HostName = r.HostName, HostId = r.HostId,
+                Players = r.Players, IsCurrent = r.IsCurrent, FromP2P = true
+            };
+            merged.Add(m);
+            byId[r.Id] = m;
+        }
+        var cloudRooms = _plugin.Cloud?.Rooms ?? new List<CloudRoom>();
+        foreach (var c in cloudRooms)
+        {
+            if (!ulong.TryParse(c.lobby_id, out var cid) || cid == 0) continue;
+            if (byId.TryGetValue(cid, out var ex))
+            {
+                // 同一张桌子两边都看到了 → 打上两个标签
+                ex.FromCloud = true;
+                if (string.IsNullOrEmpty(ex.HostName) && !string.IsNullOrEmpty(c.host_name)) ex.HostName = c.host_name;
+                if (string.IsNullOrEmpty(ex.FixId)) ex.FixId = c.fix_id ?? "";
+            }
+            else
+            {
+                var m = new MergedRoom
+                {
+                    LobbyId = cid,
+                    FixId = c.fix_id ?? "",
+                    Name = (string.IsNullOrEmpty(c.host_name) ? "某人" : c.host_name) + " 的访客表",
+                    HostName = c.host_name ?? "",
+                    Players = c.members,
+                    IsCurrent = _myLobbyId != 0 && _myLobbyId == cid,
+                    FromCloud = true
+                };
+                merged.Add(m);
+                byId[cid] = m;
+            }
+        }
+        // 当前所在房间的固定 ID 直接从游戏窗口拿, 不依赖云端是否登记过
+        string myFix = OnlineInteraction.GetFixedId(_plugin.MW);
+        if (!string.IsNullOrEmpty(myFix))
+            foreach (var m in merged)
+                if (m.IsCurrent && string.IsNullOrEmpty(m.FixId)) m.FixId = myFix;
+
+        // 当前所在排最前, 其次云端, 再按人数
+        merged.Sort((a, b) =>
+        {
+            if (a.IsCurrent != b.IsCurrent) return a.IsCurrent ? -1 : 1;
+            if (a.FromCloud != b.FromCloud) return a.FromCloud ? -1 : 1;
+            return b.Players.CompareTo(a.Players);
+        });
+
+        if (merged.Count == 0)
+        {
+            _roomList.Items.Add("还没有房间。点「刷新大厅」找其他 mod 玩家的访客表，或自己开一张。");
         }
         else
         {
-            foreach (var r in rooms)
+            foreach (var r in merged)
             {
-                // 两行布局: 第一行 房间名+房主, 第二行 桌号 + 按钮(自动换行, 不会被挤出可视区)
-                var item = new StackPanel { Margin = new Thickness(0, 2, 0, 2) };
-                string curTag = r.IsCurrent ? "  [当前所在]" : "";
-                item.Children.Add(new TextBlock
-                {
-                    Text = r.Name + "  房主:" + r.HostName,
-                    FontSize = 13,
-                    Foreground = TextBrush,
-                    TextTrimming = TextTrimming.CharacterEllipsis
-                });
+                var item = new StackPanel { Margin = new Thickness(0, 3, 0, 3) };
 
+                // 第一行: 房间名 + 房主 + 来源小标签
+                var line1 = new WrapPanel();
+                line1.Children.Add(new TextBlock
+                {
+                    Text = r.Name, FontSize = 13, Foreground = TextBrush,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 6, 0),
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    MaxWidth = 220
+                });
+                if (!string.IsNullOrEmpty(r.HostName))
+                    line1.Children.Add(new TextBlock
+                    {
+                        Text = "房主:" + r.HostName, FontSize = 12, Foreground = MutedBrush,
+                        VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0)
+                    });
+                if (r.FromP2P) line1.Children.Add(Tag("P2P"));
+                if (r.FromCloud) line1.Children.Add(Tag("云"));
+                if (r.IsCurrent) line1.Children.Add(Tag("当前所在", true));
+                item.Children.Add(line1);
+
+                // 第二行: 固定ID(有就显示, 没有退化成大厅号) + 人数 + 操作
                 var line2 = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
+                string idText = !string.IsNullOrEmpty(r.FixId) ? ("房间 " + r.FixId) : ("大厅 " + r.LobbyId);
+                if (r.Players > 0) idText += " · " + r.Players + " 人";
                 line2.Children.Add(new TextBlock
                 {
-                    Text = "桌号:" + r.Id + curTag,
+                    Text = idText,
                     FontSize = 12,
                     Foreground = MutedBrush,
                     VerticalAlignment = VerticalAlignment.Center,
@@ -931,15 +1018,16 @@ public class InteractionPanel : UserControl
                 }
                 else
                 {
-                    line2.Children.Add(SmallBtn("加入", () => JoinVisitorTable(r.Id)));
+                    line2.Children.Add(SmallBtn("加入", () => JoinVisitorTable(r.LobbyId)));
                 }
-                if (canAdmin)
+                if (canAdmin && r.HostId != 0)
                 {
                     var blocked = lobby.IsBlocked(r.HostId);
+                    var hostId = r.HostId;
                     line2.Children.Add(SmallBtn(blocked ? "解除" : "屏蔽", () =>
                     {
-                        if (blocked) lobby.UnblockPlayer(r.HostId);
-                        else lobby.BlockPlayer(r.HostId);
+                        if (blocked) lobby.UnblockPlayer(hostId);
+                        else lobby.BlockPlayer(hostId);
                         RefreshRoomList();
                     }));
                 }
@@ -947,15 +1035,42 @@ public class InteractionPanel : UserControl
                 _roomList.Items.Add(item);
             }
         }
+        if (_cloudStatus != null)
+        {
+            int p2pCount = merged.Count(x => x.FromP2P);
+            int cloudCount = merged.Count(x => x.FromCloud);
+            _cloudStatus.Text = "P2P " + p2pCount + " · 云 " + cloudCount;
+        }
         if (_roomStatusText != null)
         {
             string hubTag;
             if (lobby.SelfId == AdminConfig.ROOT_ADMIN_ID) hubTag = " [中心节点]";
             else if (lobby.IsHubActive) hubTag = " [网格模式]";
             else hubTag = " [P2P模式]";
-            _roomStatusText.Text = "mod 玩家访客表: " + rooms.Count + hubTag
+            _roomStatusText.Text = "房间 " + merged.Count + " 个" + hubTag
                 + (canAdmin && lobby.BlockedList.Count > 0 ? "  (已屏蔽 " + lobby.BlockedList.Count + " 人)" : "");
         }
+    }
+
+    /// <summary>房间列表里的来源小标签 (P2P / 云 / 当前所在)</summary>
+    private Border Tag(string text, bool accent = false)
+    {
+        return new Border
+        {
+            Background = accent ? AccentTintBrush : BgBrush,
+            BorderBrush = accent ? AccentBrush : BdrBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(3),
+            Padding = new Thickness(4, 0, 4, 1),
+            Margin = new Thickness(0, 0, 4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Child = new TextBlock
+            {
+                Text = text, FontSize = 10,
+                Foreground = accent ? AccentBrush : MutedBrush,
+                VerticalAlignment = VerticalAlignment.Center
+            }
+        };
     }
 
     private void DoRefreshRooms()
@@ -965,12 +1080,43 @@ public class InteractionPanel : UserControl
         try { lobby.QueryFriendsRooms(); } catch { }
     }
 
+    /// <summary>按 ID 加入: 支持「固定 ID」(V255082 / 255082) 和 Steam 大厅号</summary>
     private void DoJoinRoomById()
     {
         var raw = _roomIdInput?.Text?.Trim();
-        // 仅接受合法 SteamID64 (>= 76561190000000000), 避免对无意义数值发起 Steam 大厅搜索
-        if (string.IsNullOrEmpty(raw) || !ulong.TryParse(raw, out var id) || id < 76561190000000000UL) return;
-        JoinVisitorTable(id);
+        if (string.IsNullOrEmpty(raw)) return;
+
+        // 1) V255082 / 255082 → 需要先向 report.exlb.net 换大厅号(等同游戏内「按固定 ID 加入」)
+        bool looksFixed = (raw[0] == 'V' || raw[0] == 'v') ||
+                          (ulong.TryParse(raw, out var n) && n > 0 && n < 76561190000000000UL && n.ToString().Length <= 8);
+        if (looksFixed && OnlineInteraction.TryParseFixedId(raw, out var fixNum))
+        {
+            _roomStatusText.Text = "正在按固定 ID " + raw.Trim() + " 查找房间…";
+            var mw = _plugin.MW;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                ulong lid = 0;
+                string err = null;
+                try { lid = OnlineInteraction.ResolveFixedId(mw, fixNum); }
+                catch (Exception ex) { err = ex.Message; }
+                try
+                {
+                    mw?.Main?.Dispatcher?.Invoke(() =>
+                    {
+                        if (lid == 0) { _roomStatusText.Text = "固定 ID 查不到房间: " + (err ?? "未知原因"); return; }
+                        _roomStatusText.Text = "已解析 " + raw.Trim() + " → 大厅 " + lid;
+                        JoinVisitorTable(lid);
+                    });
+                }
+                catch { }
+            });
+            return;
+        }
+
+        // 2) 直接是 Steam 大厅号
+        if (ulong.TryParse(raw, out var id) && id >= 76561190000000000UL) { JoinVisitorTable(id); return; }
+        if (ulong.TryParse(raw, out var lid2) && lid2 > 1860000UL) { JoinVisitorTable(lid2); return; }
+        _roomStatusText.Text = "看不懂这个 ID，请输入 V255082 这样的固定 ID 或完整大厅号";
     }
 
     private void JoinVisitorTable(ulong lobbyId)

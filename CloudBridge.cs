@@ -63,7 +63,19 @@ namespace VPet.Plugin.OnlineInteraction
 
         private static string LogPath => Path.Combine(LocalDir, "cloudbridge.log");
         private static string AuthFlag => Path.Combine(LocalDir, "cloudbridge_authed.flag");
-        private static string ProfileDir => Path.Combine(LocalDir, "cloudbridge_profile");
+        private static string ProfileDir
+        {
+            get
+            {
+                // 按「加载了本程序集的 mod 目录名」隔离浏览器配置目录，
+                // 避免同时含本 DLL 的多个 mod（如联机互动 / 君赫自用 / 自家银行）抢同一个浏览器实例。
+                // 仅 1145141_OnlineInteraction 部署启用此隔离；其余 mod 仍用旧 cloudbridge_profile。
+                string loc = System.Reflection.Assembly.GetExecutingAssembly().Location ?? "";
+                string modName = Path.GetFileName(Path.GetDirectoryName(Path.GetDirectoryName(loc)));
+                if (string.IsNullOrEmpty(modName)) modName = "default";
+                return Path.Combine(LocalDir, "cloudbridge_profile_" + modName);
+            }
+        }
         /// <summary>浏览器 PID 清单仅作历史兼容保留，判活/清理已改为按命令行匹配（见 BrowserProcs）</summary>
         private static string PidFile => Path.Combine(LocalDir, "cloudbridge_browser_pids.txt");
 
@@ -767,9 +779,12 @@ namespace VPet.Plugin.OnlineInteraction
         {
             bool hosting = false;
             string lobbyId = "";
+            string fixId = "";
+            int members = 0;
             string steamId = _plugin.Lobby?.SelfId.ToString() ?? "";
             string petName = "";
             string hostName = "";
+            string hostSteam = "";
             int level = 0, levelMax = 0;
             double money = 0, exp = 0;
             try
@@ -810,10 +825,25 @@ namespace VPet.Plugin.OnlineInteraction
                                 var ownerIdObj = ownerObj?.GetType().GetProperty("Id")?.GetValue(ownerObj);
                                 ulong owner = OnlineInteraction.GetSteamIdValue(ownerIdObj);
                                 hosting = owner != 0 && owner == SteamClient.SteamId.Value;
+                                hostSteam = owner != 0 ? owner.ToString() : "";
+                                if (owner != 0)
+                                {
+                                    // 成员的视角要显示「房主是谁」, 自己当房主时才用自己
+                                    try { var hn = new Friend(owner).Name; if (!string.IsNullOrEmpty(hn)) hostName = hn; } catch { }
+                                }
+                                try
+                                {
+                                    var mcProp = lb.GetType().GetProperty("MemberCount");
+                                    if (mcProp != null) members = Convert.ToInt32(mcProp.GetValue(lb) ?? 0);
+                                }
+                                catch { }
                             }
                         }
                     }
                 }
+                // 固定 ID: 游戏访客表窗口里显示的短号 (V255082), 由 report.exlb.net 分配
+                fixId = OnlineInteraction.GetFixedId(_plugin.MW);
+                if (string.IsNullOrEmpty(hostName)) hostName = hosting ? (string.IsNullOrEmpty(SteamClient.Name) ? petName : SteamClient.Name) : petName;
             }
             catch (Exception ex) { Log("GetState 异常: " + ex); }
             var saves = ListSaveFiles(1);
@@ -822,7 +852,10 @@ namespace VPet.Plugin.OnlineInteraction
                 connected = true,
                 hosting,
                 lobbyId,
+                fixId,
+                members,
                 steamId,
+                hostSteam,
                 petName,
                 hostName,
                 level,
@@ -854,10 +887,12 @@ namespace VPet.Plugin.OnlineInteraction
     public class CloudRoom
     {
         public string lobby_id { get; set; } = "";
+        public string fix_id { get; set; } = "";       // 游戏固定 ID (V255082)
         public string host_steam { get; set; } = "";
         public string host_name { get; set; } = "";
         public string pet_name { get; set; } = "";
         public string region { get; set; } = "";
+        public int members { get; set; } = 0;
         public int level { get; set; } = 0;
         public int level_max { get; set; } = 0;
     }
