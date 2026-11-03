@@ -1,20 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
   <PropertyGroup>
     <AssemblyName>VPet.Plugin.OnlineInteraction</AssemblyName>
+    <RootNamespace>VPet.Plugin.OnlineInteraction</RootNamespace>
+    <OutputType>Library</OutputType>
     <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
     <UseWPF>True</UseWPF>
-    <TargetFramework>netcoreapp8.0</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <PlatformTarget>x64</PlatformTarget>
-  </PropertyGroup>
-  <PropertyGroup>
-    <LangVersion>11.0</LangVersion>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <NoWarn>CS8632;CS0168;CS0219</NoWarn>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
   </PropertyGroup>
-  <PropertyGroup />
-  <ItemGroup />
   <ItemGroup>
+    <!-- 这些程序集来自 VPet 游戏目录，自行编译时把对应 dll 放到 lib\ 下，
+         或改成指向你本地 VPet 安装目录的同名 dll。 -->
     <Reference Include="VPet-Simulator.Windows.Interface" />
     <Reference Include="VPet-Simulator.Core" />
     <Reference Include="LinePutScript" />
+    <Reference Include="Panuon.WPF" />
+    <Reference Include="Panuon.WPF.UI" />
+    <Reference Include="Facepunch.Steamworks.Win64" />
   </ItemGroup>
 </Project>

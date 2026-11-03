@@ -10,7 +10,6 @@ public class RedPacketData
 	[Line]
 	public string SenderName { get; set; } = "";
 
-
 	[Line]
 	public long Timestamp { get; set; }
 }
