@@ -591,7 +591,12 @@ namespace VPet.Plugin.OnlineInteraction
             sb.Append("Content-Type: application/json; charset=utf-8\r\n");
             sb.Append("Access-Control-Allow-Origin: *\r\n");
             sb.Append("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n");
-            sb.Append("Access-Control-Allow-Headers: Content-Type\r\n");
+            sb.Append("Access-Control-Allow-Headers: Content-Type, X-Requested-With\r\n");
+            // Chrome/Edge 的 Private Network Access: 公网 https 页面访问 127.0.0.1 前
+            // 会先发 OPTIONS 预检并带 Access-Control-Request-Private-Network, 不回这个头
+            // 就被拦下来, 前端只看到 "Failed to fetch"
+            sb.Append("Access-Control-Allow-Private-Network: true\r\n");
+            sb.Append("Vary: Origin, Access-Control-Request-Private-Network\r\n");
             sb.Append("Content-Length: " + bodyBytes.Length + "\r\n");
             sb.Append("Connection: close\r\n\r\n");
             var headerBytes = Encoding.ASCII.GetBytes(sb.ToString());
@@ -846,6 +851,43 @@ namespace VPet.Plugin.OnlineInteraction
                 if (string.IsNullOrEmpty(hostName)) hostName = hosting ? (string.IsNullOrEmpty(SteamClient.Name) ? petName : SteamClient.Name) : petName;
             }
             catch (Exception ex) { Log("GetState 异常: " + ex); }
+
+            // 本机视野内所有可加入的访客表: Steam P2P 发现 + 好友/hub 下发 + 大厅搜索
+            // 网页会把这批整体登记到云端, 这样没开网页的房主、以及非房主玩家的视角
+            // 也能把房间目录补全(不用每个人自己登录才登记)。
+            var discovered = new List<object>();
+            bool tableOpen = false;
+            try
+            {
+                var st = OnlineInteraction.GetVisitorTableWindowState(_plugin.MW);
+                tableOpen = st.HasValue && st.Value.exists;
+            }
+            catch { }
+            try
+            {
+                var vis = _plugin.Lobby?.GetVisibleRooms();
+                if (vis != null)
+                {
+                    foreach (var r in vis)
+                    {
+                        if (r == null || r.Id == 0) continue;
+                        discovered.Add(new
+                        {
+                            lobbyId = r.Id.ToString(),
+                            hostName = r.HostName ?? "",
+                            petName = r.Name ?? "",
+                            hostSteam = r.HostId != 0 ? r.HostId.ToString() : "",
+                            members = r.Players,
+                            maxMembers = r.Max,
+                            isCurrent = r.IsCurrent,
+                            friendsOnly = r.FriendsOnly
+                        });
+                        if (discovered.Count >= 80) break;
+                    }
+                }
+            }
+            catch (Exception ex) { Log("读取可见房间失败: " + ex.Message); }
+
             var saves = ListSaveFiles(1);
             return new
             {
@@ -863,6 +905,8 @@ namespace VPet.Plugin.OnlineInteraction
                 money,
                 exp,
                 authed = HasSession,
+                tableOpen,
+                discovered,
                 saveDir = SavesDir(),
                 latestSave = saves.Count > 0 ? saves[0].Name : ""
             };
