@@ -7,6 +7,10 @@
 - 框架：.NET 8（WPF）
 - 游戏版本要求：≥ 11070（`gamever#11070`）
 
+> **下载即用**：本分支根目录就是一个完整的 mod 目录（`info.lps`、`icon.png`、`plugin/VPet.Plugin.DayTrip.dll`、
+> `image/`（含 7 张风景图 + `feelings.lps`）、`trip_history.lps`）。整包下载后重命名成 `一天特种兵旅行`，
+> 放进 `<VPet安装目录>/mod/` 即可，不用自己编译。
+
 ## 功能
 
 | 旅行方式 | 时长 | 费用 | 体力 |
@@ -41,6 +45,9 @@ VPet-Plugin-DayTrip/
     ├── trip_history.lps
     └── image/ …                 # 风景照 / feelings.lps
 ```
+
+> 注：**本分支把 `mod/` 的内容摊平到了仓库根目录**（`info.lps`、`plugin/`、`image/`、`trip_history.lps`），
+> 源码 `.cs` / `.csproj` / `.baml` 也直接在根目录，这样打包下载就是一个现成的 mod 目录。上面的 `src/` + `mod/` 是本地工程的组织方式。
 
 ## 编译
 
