@@ -8,6 +8,9 @@
 - 游戏版本要求：≥ 11071（`gamever#11071`）
 - 含两个插件程序集：`VPet.Plugin.BackpackTrade.dll`（交易系统）+ `VPet.Plugin.YouHuiKa.dll`（优惠券）
 
+> **下载即用**：本分支根目录就是一个完整的 mod 目录（`info.lps`、`icon.png`、`plugin/*.dll`、`food/`、`image/`、`pet/`、`text/` 齐全）。
+> 整包下载后重命名成 `交易系统`，放进 `<VPet安装目录>/mod/` 即可，不用自己编译。
+
 ## 功能
 
 ### 跳蚤超市（`BackpackTrade`）
@@ -56,6 +59,9 @@ VPet-Plugin-BackpackTrade/
     ├── image/food/…            # 食物图标
     └── plugin/VPet.Plugin.YouHuiKa.deps.json
 ```
+
+> 注：**本分支把 `mod/` 的内容摊平到了仓库根目录**（`info.lps`、`plugin/`、`food/`、`image/`、`pet/`、`text/`），源码 `.cs` / `.csproj` 也直接在根目录，这样打包下载就是一个现成的 mod 目录。
+> 上面的 `src/` + `mod/` 是本地工程的组织方式。
 
 ## 编译
 

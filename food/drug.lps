@@ -1,0 +1,13 @@
+food:|name#万能营养液:|type#Meal:|Exp#10000000:|Strength#114514:|StrengthFood#100000:|StrengthDrink#100000:|Health#100:|Likability#9999:|Feeling#9999:|price#9999:|graph#eat:|desc#一瓶包治百病的神奇药水,喝下它仿佛获得了全世界:|
+food:|name#体力结晶:|type#Functional:|Exp#50:|Strength#114514:|StrengthFood#10:|StrengthDrink#10:|Health#10:|Feeling#5000:|price#8888:|graph#eat:|desc#蕴含着无穷体力的结晶体,吃一颗精神一整天:|
+food:|name#饱食炸弹:|type#Meal:|Exp#10:|StrengthFood#100000:|StrengthDrink#100000:|Feeling#1000:|price#7777:|graph#eat:|desc#超级浓缩饱食炸弹,吃一口管一年:|
+food:|name#猫薄荷:|type#Gift:|Likability#6666:|Feeling#10000:|price#6666:|graph#eat:|desc#让好感度直接满级的神秘物品:|
+food:|name#超大经验暴涨丸:|type#Gift:|Exp#10000000:|Feeling#9999:|price#5555:|graph#eat:|desc#蕴含一千万经验的超级丹药,吃完直接起飞:|
+food:|name#优惠券:|type#Gift:|Exp#300:|Strength#0:|StrengthFood#0:|StrengthDrink#0:|Feeling#0:|Health#0:|Likability#20:|Price#4444:|Desc#优惠券_Description:|Graph:|Image#/null:|
+food:|name#巨大经验暴涨丸:|type#Gift:|Exp#100000000:|Feeling#99999:|price#3333:|graph#eat:|desc#蕴含一亿经验的超级丹药,吃完直接起飞:|
+food:|name#大经验暴涨丸:|type#Gift:|Exp#1000000:|Feeling#999:|price#2222:|graph#eat:|desc#蕴含一百万经验的超级丹药,吃完直接起飞:|
+food:|name#中经验暴涨丸:|type#Gift:|Exp#100000:|Feeling#99:|price#1111:|graph#eat:|desc#蕴含十万经验的超级丹药,吃完直接起飞:|
+food:|name#小经验暴涨丸:|type#Gift:|Exp#10000:|Feeling#9:|price#999:|graph#eat:|desc#蕴含一万经验的超级丹药,吃完直接起飞:|
+food:|name#迷你经验暴涨丸:|type#Gift:|Exp#1000:|Feeling#1:|price#888:|graph#eat:|desc#蕴含一千经验的超级丹药,吃完直接起飞:|
+food:|name#小体力结晶:|type#Functional:|Exp#50:|Strength#1145:|StrengthFood#1:|StrengthDrink#1:|Health#1:|Feeling#50:|price#777:|graph#eat:|desc#蕴含着无穷体力的结晶体,吃一颗精神一小时:|
+food:|name#碳水炸弹:|type#Meal:|Exp#10:|StrengthFood#1000:|StrengthDrink#1000:|Feeling#10:|price#666:|graph#eat:|desc#超级浓缩饱食炸弹,吃一口管一月:|
