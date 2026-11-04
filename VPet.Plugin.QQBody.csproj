@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>VPet.Plugin.QQBody</AssemblyName>
+    <RootNamespace>VPet.Plugin.QQBody</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>1.0.0</Version>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- VPet 游戏目录，可用 -p:VPetGamePath=... 覆盖 -->
+    <VPetGamePath Condition="'$(VPetGamePath)' == ''">F:\steam\steamapps\common\VPet</VPetGamePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="VPet-Simulator.Windows.Interface">
+      <HintPath>$(VPetGamePath)\VPet-Simulator.Windows.Interface.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VPet-Simulator.Core">
+      <HintPath>$(VPetGamePath)\VPet-Simulator.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="LinePutScript">
+      <HintPath>$(VPetGamePath)\LinePutScript.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="LinePutScript.Localization.WPF">
+      <HintPath>$(VPetGamePath)\LinePutScript.Localization.WPF.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Panuon.WPF.UI">
+      <HintPath>$(VPetGamePath)\Panuon.WPF.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Panuon.WPF">
+      <HintPath>$(VPetGamePath)\Panuon.WPF.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -1,5 +1,5 @@
-vupmod#VPet联机互动:|author#君赫:|gamever#11075:|ver#20120:|
-intro#Steam 免服务器联机 · 云端房间 · 等级转生金钱排行榜 · 整份云存档 · 投喂红包打招呼摸头 · 手机可看:|
-authorid#1591629865:|
-itemid#3747726867:|
+vupmod#QQBody桥接:|author#君赫:|gamever#11075:|ver#110:|
+intro#把 QQ 机器人接进桌宠，让桌宠替你说话intro/id纯 HTTP 接口，任意机器人框架可驱动，本机通信不联外网intro/id使用：装进 VPet 的 mod 目录后重启，机器人往本机 52816 端口发请求（say 说话、action 切动画、bubble 弹气泡、events 回传），详见 mod 内《使用方案.md》:|
 plugin#plugin:|
+authorid#1591629865:|
+itemid#3832872918:|
