@@ -245,6 +245,39 @@ public class OnlineInteraction : MainPlugin
         throw new InvalidOperationException("该固定 ID 查不到对应房间" + (string.IsNullOrEmpty(s) ? "" : "（返回 " + s.Trim() + "）"));
     }
 
+    /// <summary>
+    /// 反查一张访客表(大厅)对应的固定 ID: 调游戏自己的 GetVPetRoom("SteamRoomGetFixID", ...),
+    /// 成功返回 "V8888", 查不到返回 ""。
+    /// 和 ResolveFixedId 一样必须在后台线程调用(内部 await)。
+    /// 防误判: 服务端按房主 hoststeamid 建档, 若返回的正好是我自己的固定 ID,
+    /// 说明接口没按 lobbyid 命中、退回了我本机档案 → 视为失败, 避免把别人的房间标成我的号。
+    /// </summary>
+    internal static string GetFixIdByLobby(IMainWindow mw, ulong lobbyId)
+    {
+        if (mw == null || lobbyId == 0) return "";
+        try
+        {
+            var m = mw.GetType().GetMethod("GetVPetRoom", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (m == null) return "";
+            object r;
+            try { r = m.Invoke(mw, new object[] { "SteamRoomGetFixID", 0, lobbyId }); }
+            catch (TargetInvocationException) { return ""; }
+            var task = r as System.Threading.Tasks.Task<string>;
+            if (task == null) return "";
+            var s = (task.GetAwaiter().GetResult() ?? "").Trim();
+            if (s.Length == 0) return "";
+            if (s[0] == 'V' || s[0] == 'v') s = s.Substring(1);
+            if (s.Length == 0 || s.Length > 9 || !s.All(char.IsDigit)) return "";   // 返回的是报错文本
+            if (!int.TryParse(s, out var n) || n <= 0) return "";
+            var fix = "V" + n;
+            // 我自己的号 → 说明没命中别人的档, 别乱标
+            var mine = GetFixedId(mw);
+            if (!string.IsNullOrEmpty(mine) && string.Equals(mine, fix, StringComparison.OrdinalIgnoreCase)) return "";
+            return fix;
+        }
+        catch { return ""; }
+    }
+
     /// <summary>从 "V255082" / "255082" 里取出数字, 非法返回 false</summary>
     internal static bool TryParseFixedId(string raw, out int fixId)
     {

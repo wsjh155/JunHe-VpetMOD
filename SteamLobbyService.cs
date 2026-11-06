@@ -311,8 +311,33 @@ public class SteamLobbyService : IDisposable
         return list;
     }
 
-    // ============ 联机网格 (每个人都是微型中心, 互相转发房间信息) ============
-    /// <summary>向所有已知 peer (hub + Steam好友 + mod好友) 报到/心跳 (内容=本机访客表lobbyId|名字)</summary>
+    /// <summary>
+    /// 把这个房间从本机所有缓存里摘掉 (加入失败/房主已关表时调用), 并当成墓碑继续广播,
+    /// 让别的玩家列表里也别再留着它。
+    /// </summary>
+    public void ForgetRoom(ulong lobbyId)
+    {
+        if (lobbyId == 0) return;
+        Ui(() =>
+        {
+            try { ModRooms.RemoveAll(r => r.Id == lobbyId); } catch { }
+            try { PublicRooms.RemoveAll(r => r.Id == lobbyId); } catch { }
+            try { FriendRooms.RemoveAll(r => r.Id == lobbyId); } catch { }
+            lock (_hubLock)
+            {
+                foreach (var kv in _hubRegistry.Where(kv => kv.Value.LobbyId == lobbyId).ToList())
+                {
+                    kv.Value.LobbyId = 0;
+                    kv.Value.LastSeen = NowUnix();
+                }
+            }
+            RebuildHubRooms();
+            RoomsChanged?.Invoke();
+            try { RelayRegistry(0); } catch { }
+        });
+    }
+
+    // ============ 联机网格 (每个人都是微型中心, 互相转发房间信息) ============    /// <summary>向所有已知 peer (hub + Steam好友 + mod好友) 报到/心跳 (内容=本机访客表lobbyId|名字)</summary>
     public void RegisterWithHub()
     {
         if (!SteamReady) return;
@@ -337,16 +362,22 @@ public class SteamLobbyService : IDisposable
         return set;
     }
 
-    /// <summary>hub: 构建全局注册表字符串 (仅含已开访客表且未被全局屏蔽者)</summary>
+    /// <summary>
+    /// hub: 构建全局注册表字符串 (仅含已开访客表且未被全局屏蔽者)。
+    /// lobbyId=0 的条目是"墓碑": 表示这个人已经关掉访客表了, 要广播出去让别人删掉,
+    /// 否则关掉的房间会一直留在别人的列表里(点了加入才报"房间已关闭")。
+    /// </summary>
     private void BuildRegistry(out string content)
     {
         var sb = new System.Text.StringBuilder();
+        long now = NowUnix();
         lock (_hubLock)
         {
             foreach (var kv in _hubRegistry)
             {
-                if (kv.Value.LobbyId == 0) continue;       // 没开访客表
                 if (IsBlocked(kv.Key)) continue;           // 全局屏蔽
+                // 墓碑只广播一小段时间, 之后就没必要再喊了
+                if (kv.Value.LobbyId == 0 && now - kv.Value.LastSeen > 60) continue;
                 if (sb.Length > 0) sb.Append(';');
                 sb.Append(kv.Key).Append('|').Append(kv.Value.LobbyId).Append('|').Append(kv.Value.Name ?? "");
             }
@@ -387,15 +418,23 @@ public class SteamLobbyService : IDisposable
             foreach (var entry in content.Split(';', StringSplitOptions.RemoveEmptyEntries))
             {
                 var p = entry.Split('|');
-                if (p.Length >= 3 && ulong.TryParse(p[0], out var hid) && ulong.TryParse(p[1], out var lid))
+                if (p.Length < 3 || !ulong.TryParse(p[0], out var hid) || !ulong.TryParse(p[1], out var lid)) continue;
+                if (lid == 0)
                 {
-                    if (_hubRegistry.TryGetValue(hid, out var e))
+                    // 墓碑: 对方已经关掉访客表 → 本地条目改成 0(列表里立刻消失), 并继续往下传
+                    if (_hubRegistry.TryGetValue(hid, out var dead))
                     {
-                        if (e.LobbyId != lid || e.Name != p[2]) { e.LobbyId = lid; e.Name = p[2]; changed = true; }
-                        e.LastSeen = now;
+                        if (dead.LobbyId != 0) { dead.LobbyId = 0; changed = true; }
+                        dead.LastSeen = now;
                     }
-                    else { _hubRegistry[hid] = new HubEntry { Name = p[2], LobbyId = lid, LastSeen = now }; changed = true; }
+                    continue;
                 }
+                if (_hubRegistry.TryGetValue(hid, out var e))
+                {
+                    if (e.LobbyId != lid || e.Name != p[2]) { e.LobbyId = lid; e.Name = p[2]; changed = true; }
+                    e.LastSeen = now;
+                }
+                else { _hubRegistry[hid] = new HubEntry { Name = p[2], LobbyId = lid, LastSeen = now }; changed = true; }
             }
         }
         return changed;
@@ -405,13 +444,14 @@ public class SteamLobbyService : IDisposable
     private void RebuildHubRooms()
     {
         var rooms = new List<RoomEntry>();
+        long now = NowUnix();
         lock (_hubLock)
         {
             // 关键: 多人可能同在"一张"访客表里 (同一个 lobbyId)。
             // 早期版本按"玩家SteamID"建条目, 导致两个人联机被显示成两个房间。
             // 这里改为按 lobbyId 分组合并: 同一张访客表 = 一个房间。
             var groups = _hubRegistry
-                .Where(kv => kv.Value.LobbyId != 0 && !IsBlocked(kv.Key))
+                .Where(kv => kv.Value.LobbyId != 0 && !IsBlocked(kv.Key) && now - kv.Value.LastSeen <= 90)
                 .GroupBy(kv => kv.Value.LobbyId);
             foreach (var g in groups)
             {
@@ -906,7 +946,9 @@ public class SteamLobbyService : IDisposable
         Lobby? lobby = await SteamMatchmaking.JoinLobbyAsync(lobbyId);
         if (lobby == null || lobby.Value.Owner.Id.Value == 0)
         {
-            Ui(() => Notify?.Invoke("加入房间失败 (房间可能已关闭, 或仅限好友房但你不是房主好友)"));
+            // 这张桌子已经不在了 → 立刻从列表里摘掉, 别让用户反复点到
+            ForgetRoom(lobbyId);
+            Ui(() => Notify?.Invoke("房间已关闭或已解散，已从列表移除"));
             return false;
         }
         if (lobby.Value.GetData(DATA_TAG) != "1")

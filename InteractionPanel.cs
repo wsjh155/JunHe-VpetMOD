@@ -32,6 +32,9 @@ public class InteractionPanel : UserControl
     private TextBlock _myTableText;
     private TextBlock _visitorStateText;
     private ulong _myLobbyId;
+    // 房间 → 固定ID 的反查缓存 (游戏不把别人的固定ID告诉我们, 只能拿 lobbyId 去问服务端)
+    private readonly Dictionary<ulong, string> _fixIdCache = new Dictionary<ulong, string>();
+    private readonly HashSet<ulong> _fixIdTried = new HashSet<ulong>();
     // 顶部 tab 栏
 
     // ── 配色 ──────────────────────────────────────────────
@@ -326,7 +329,7 @@ public class InteractionPanel : UserControl
         RefreshRoomList();
 
         // 延迟刷新（好友列表有时较慢）
-        var retryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+        var retryTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
         retryTimer.Tick += (_, _) =>
         {
             if (_mpWin.Friends != null && _friendList.Items.Count == 0)
@@ -811,6 +814,7 @@ public class InteractionPanel : UserControl
         public bool IsCurrent;
         public bool FromP2P;
         public bool FromCloud;
+        public bool FriendsOnly;   // 仅限好友房: 加不进去不代表房间关了, 不能下架
     }
 
     /// <summary>房间列表统一由 RefreshRoomList 渲染(两个来源合并), 这里只做兼容入口</summary>
@@ -916,7 +920,8 @@ public class InteractionPanel : UserControl
             var m = new MergedRoom
             {
                 LobbyId = r.Id, Name = r.Name, HostName = r.HostName, HostId = r.HostId,
-                Players = r.Players, IsCurrent = r.IsCurrent, FromP2P = true
+                Players = r.Players, IsCurrent = r.IsCurrent, FromP2P = true,
+                FriendsOnly = r.FriendsOnly
             };
             merged.Add(m);
             byId[r.Id] = m;
@@ -953,6 +958,15 @@ public class InteractionPanel : UserControl
         if (!string.IsNullOrEmpty(myFix))
             foreach (var m in merged)
                 if (m.IsCurrent && string.IsNullOrEmpty(m.FixId)) m.FixId = myFix;
+
+        // 其他房间的固定 ID: 游戏不会主动告诉我们, 用 lobbyId 反查(后台线程 + 缓存)
+        foreach (var m in merged)
+        {
+            if (!string.IsNullOrEmpty(m.FixId)) continue;
+            if (_fixIdCache.TryGetValue(m.LobbyId, out var cachedFix) && !string.IsNullOrEmpty(cachedFix))
+                m.FixId = cachedFix;
+        }
+        StartFixIdLookup(merged);
 
         // 当前所在排最前, 其次云端, 再按人数
         merged.Sort((a, b) =>
@@ -993,9 +1007,12 @@ public class InteractionPanel : UserControl
                 if (r.IsCurrent) line1.Children.Add(Tag("当前所在", true));
                 item.Children.Add(line1);
 
-                // 第二行: 固定ID(有就显示, 没有退化成大厅号) + 人数 + 操作
+                // 第二行: 固定ID(查不到就写"未知", 不再显示大厅号) + 人数 + 操作
                 var line2 = new WrapPanel { Margin = new Thickness(0, 4, 0, 0) };
-                string idText = !string.IsNullOrEmpty(r.FixId) ? ("房间 " + r.FixId) : ("大厅 " + r.LobbyId);
+                string idText;
+                if (!string.IsNullOrEmpty(r.FixId)) idText = "房间 " + r.FixId;
+                else if (_fixIdTried.Contains(r.LobbyId)) idText = "房间 固定ID未知";
+                else idText = "房间 固定ID查询中…";
                 if (r.Players > 0) idText += " · " + r.Players + " 人";
                 line2.Children.Add(new TextBlock
                 {
@@ -1018,7 +1035,8 @@ public class InteractionPanel : UserControl
                 }
                 else
                 {
-                    line2.Children.Add(SmallBtn("加入", () => JoinVisitorTable(r.LobbyId)));
+                    var friendsOnlyRoom = r.FriendsOnly;
+                    line2.Children.Add(SmallBtn("加入", () => JoinVisitorTable(r.LobbyId, friendsOnlyRoom)));
                 }
                 if (canAdmin && r.HostId != 0)
                 {
@@ -1073,6 +1091,41 @@ public class InteractionPanel : UserControl
         };
     }
 
+    /// <summary>
+    /// 后台反查房间固定 ID (每轮最多 8 个, 结果缓存在 _fixIdCache)。
+    /// 查不到就记空串, 不再反复请求; 显示层退化为「固定ID未知」。
+    /// </summary>
+    private void StartFixIdLookup(List<MergedRoom> merged)
+    {
+        if (merged == null || merged.Count == 0) return;
+        var mw = _plugin?.MW;
+        if (mw == null) return;
+        int started = 0;
+        foreach (var m in merged)
+        {
+            if (started >= 8) break;
+            if (!string.IsNullOrEmpty(m.FixId)) continue;
+            if (_fixIdCache.ContainsKey(m.LobbyId)) continue;
+            if (!_fixIdTried.Add(m.LobbyId)) continue;
+            started++;
+            ulong lid = m.LobbyId;
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                string fix = "";
+                try { fix = OnlineInteraction.GetFixIdByLobby(mw, lid); } catch { }
+                try
+                {
+                    mw.Main?.Dispatcher?.BeginInvoke(new Action(() =>
+                    {
+                        _fixIdCache[lid] = fix ?? "";
+                        if (!string.IsNullOrEmpty(fix)) RefreshRoomList();
+                    }));
+                }
+                catch { }
+            });
+        }
+    }
+
     private void DoRefreshRooms()
     {
         var lobby = _plugin.Lobby;
@@ -1119,7 +1172,7 @@ public class InteractionPanel : UserControl
         _roomStatusText.Text = "看不懂这个 ID，请输入 V255082 这样的固定 ID 或完整大厅号";
     }
 
-    private void JoinVisitorTable(ulong lobbyId)
+    private void JoinVisitorTable(ulong lobbyId, bool friendsOnly = false)
     {
         try
         {
@@ -1132,8 +1185,36 @@ public class InteractionPanel : UserControl
             OnlineInteraction.JoinVisitorTable(_plugin.MW, lobbyId);
         }
         catch (Exception ex) { System.Windows.MessageBox.Show("加入失败: " + ex.Message); }
+        // 加入是异步的: 过几秒还没进去, 基本就是这张桌子已经关了 → 从列表摘掉
+        WatchJoinResult(lobbyId, friendsOnly);
         try { _plugin.Lobby?.RefreshMyLobbyId(); } catch { }
         RefreshRoomList();
+    }
+
+    /// <summary>
+    /// 加入后 6 秒仍不在该访客表里 → 判定房间已关闭, 从列表移除并提示。
+    /// 仅限好友房例外: 加不进去是权限问题, 不代表房间没了。
+    /// </summary>
+    private void WatchJoinResult(ulong lobbyId, bool friendsOnly)
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(6) };
+        timer.Tick += (s, e) =>
+        {
+            timer.Stop();
+            try
+            {
+                var lb = _plugin.Lobby;
+                if (lb == null) return;
+                lb.RefreshMyLobbyId();
+                if (lb.MyLobbyId == lobbyId) return;      // 成功进去了
+                if (friendsOnly) return;                  // 好友房加不进去不算"已关闭"
+                lb.ForgetRoom(lobbyId);
+                if (_roomStatusText != null) _roomStatusText.Text = "房间已关闭或已解散，已从列表移除";
+                RefreshRoomList();
+            }
+            catch { }
+        };
+        timer.Start();
     }
 
     // ── v2: 多页签 + 管理 ────────────────────────────────
