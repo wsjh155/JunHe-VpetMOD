@@ -919,7 +919,7 @@ public class InteractionPanel : UserControl
         {
             var m = new MergedRoom
             {
-                LobbyId = r.Id, Name = r.Name, HostName = r.HostName, HostId = r.HostId,
+                LobbyId = r.Id, FixId = r.FixId ?? "", Name = r.Name, HostName = r.HostName, HostId = r.HostId,
                 Players = r.Players, IsCurrent = r.IsCurrent, FromP2P = true,
                 FriendsOnly = r.FriendsOnly
             };

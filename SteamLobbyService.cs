@@ -17,6 +17,7 @@ namespace VPet.Plugin.OnlineInteraction;
 public class RoomEntry
 {
     public ulong Id;            // 桌号 = 访客表 Steam lobbyId (同一访客表唯一)
+    public string FixId = "";   // 房间固定ID (V8888): 由房主在广播里带出来
     public string Name = "";
     public string HostName = "";
     public ulong HostId;
@@ -111,7 +112,7 @@ public class SteamLobbyService : IDisposable
     private long _hubLastSeen;     // 客户端: 最近收到 hub 注册表的时间(unix秒); 判断是否走hub模式
     private readonly object _hubLock = new();
     private readonly Dictionary<ulong, HubEntry> _hubRegistry = new(); // 仅 hub(根管理员)用: SteamID -> 在线访客表
-    private class HubEntry { public string Name = ""; public ulong LobbyId; public long LastSeen; }
+    private class HubEntry { public string Name = ""; public string FixId = ""; public ulong LobbyId; public long LastSeen; }
     private System.Windows.Threading.DispatcherTimer _heartbeat;
 
 
@@ -344,7 +345,10 @@ public class SteamLobbyService : IDisposable
         ulong myLobby = 0;
         try { var vt = OnlineInteraction.GetVisitorTableInfo(_plugin.MW); if (vt.HasValue) myLobby = vt.Value.lobbyId; } catch { }
         var msg = new MPMessage { Type = MSGTYPE_HUB_REGISTER };
-        msg.SetContent(myLobby + "|" + SelfName);
+        // 内容: lobbyId|名字|固定ID —— 固定ID 由房主自己带出来, 别人就不用再猜了
+        string myFix = "";
+        if (myLobby != 0) { try { myFix = OnlineInteraction.GetFixedId(_plugin.MW) ?? ""; } catch { } }
+        msg.SetContent(myLobby + "|" + SelfName + "|" + myFix);
         foreach (var pid in GetKnownPeers())
         {
             if (pid == SelfId) continue;
@@ -379,7 +383,8 @@ public class SteamLobbyService : IDisposable
                 // 墓碑只广播一小段时间, 之后就没必要再喊了
                 if (kv.Value.LobbyId == 0 && now - kv.Value.LastSeen > 60) continue;
                 if (sb.Length > 0) sb.Append(';');
-                sb.Append(kv.Key).Append('|').Append(kv.Value.LobbyId).Append('|').Append(kv.Value.Name ?? "");
+                sb.Append(kv.Key).Append('|').Append(kv.Value.LobbyId).Append('|').Append(kv.Value.Name ?? "")
+                  .Append('|').Append(kv.Value.FixId ?? "");
             }
         }
         content = sb.ToString();
@@ -424,17 +429,19 @@ public class SteamLobbyService : IDisposable
                     // 墓碑: 对方已经关掉访客表 → 本地条目改成 0(列表里立刻消失), 并继续往下传
                     if (_hubRegistry.TryGetValue(hid, out var dead))
                     {
-                        if (dead.LobbyId != 0) { dead.LobbyId = 0; changed = true; }
+                        if (dead.LobbyId != 0) { dead.LobbyId = 0; dead.FixId = ""; changed = true; }
                         dead.LastSeen = now;
                     }
                     continue;
                 }
+                string fixId = p.Length > 3 ? (p[3] ?? "").Trim() : "";
                 if (_hubRegistry.TryGetValue(hid, out var e))
                 {
-                    if (e.LobbyId != lid || e.Name != p[2]) { e.LobbyId = lid; e.Name = p[2]; changed = true; }
+                    if (e.LobbyId != lid || e.Name != p[2] || e.FixId != fixId)
+                    { e.LobbyId = lid; e.Name = p[2]; e.FixId = fixId; changed = true; }
                     e.LastSeen = now;
                 }
-                else { _hubRegistry[hid] = new HubEntry { Name = p[2], LobbyId = lid, LastSeen = now }; changed = true; }
+                else { _hubRegistry[hid] = new HubEntry { Name = p[2], FixId = fixId, LobbyId = lid, LastSeen = now }; changed = true; }
             }
         }
         return changed;
@@ -465,6 +472,7 @@ public class SteamLobbyService : IDisposable
                 rooms.Add(new RoomEntry
                 {
                     Id = g.Key,                              // 桌号 = 访客表 lobbyId
+                    FixId = g.Select(kv => kv.Value.FixId).FirstOrDefault(x => !string.IsNullOrEmpty(x)) ?? "",
                     Name = ownerName + " 的访客表" + suffix,
                     HostName = ownerName,
                     HostId = owner.Key,
@@ -728,15 +736,17 @@ public class SteamLobbyService : IDisposable
                     var parts = (msg.GetContent() ?? "").Split('|');
                     ulong lobbyId = parts.Length > 0 && ulong.TryParse(parts[0], out var l) ? l : 0;
                     string name = parts.Length > 1 ? parts[1] : from.ToString();
+                    string fixId = parts.Length > 2 ? (parts[2] ?? "").Trim() : "";
                     bool changed = false;
                     lock (_hubLock)
                     {
                         if (_hubRegistry.TryGetValue(from, out var e))
                         {
-                            if (e.LobbyId != lobbyId || e.Name != name) { e.LobbyId = lobbyId; e.Name = name; changed = true; }
+                            if (e.LobbyId != lobbyId || e.Name != name || e.FixId != fixId)
+                            { e.LobbyId = lobbyId; e.Name = name; e.FixId = fixId; changed = true; }
                             e.LastSeen = NowUnix();
                         }
-                        else { _hubRegistry[from] = new HubEntry { Name = name, LobbyId = lobbyId, LastSeen = NowUnix() }; changed = true; }
+                        else { _hubRegistry[from] = new HubEntry { Name = name, FixId = fixId, LobbyId = lobbyId, LastSeen = NowUnix() }; changed = true; }
                     }
                     SendRegistryTo(from);          // 立即回给报到者本机已知列表
                     if (changed) RelayRegistry(from); // 变化则转发给其他微型中心 (回声排除报到者)
@@ -770,7 +780,9 @@ public class SteamLobbyService : IDisposable
                     if (vt.HasValue)
                     {
                         var reply = new MPMessage { Type = MSGTYPE_ROOM_REPLY };
-                        reply.SetContent($"{vt.Value.lobbyId}|{SelfName}的访客表|{vt.Value.members}|member");
+                        string myFix = "";
+                        try { myFix = OnlineInteraction.GetFixedId(_plugin.MW) ?? ""; } catch { }
+                        reply.SetContent($"{vt.Value.lobbyId}|{SelfName}的访客表|{vt.Value.members}|member|{myFix}");
                         SendP2P(from, reply);
                     }
                     break;
@@ -794,11 +806,13 @@ public class SteamLobbyService : IDisposable
                         if (rid != _lobby.Id.Value && !IsBlocked(from))
                         {
                             var existing = ModRooms.FirstOrDefault(r => r.Id == rid);
+                            string fixId = parts.Length > 4 ? (parts[4] ?? "").Trim() : "";
                             if (existing == null)
                             {
                                 ModRooms.Add(new RoomEntry
                                 {
                                     Id = rid,
+                                    FixId = fixId,
                                     Name = parts[1],
                                     HostName = f?.Name ?? fromName,
                                     HostId = from,
@@ -811,6 +825,7 @@ public class SteamLobbyService : IDisposable
                             {
                                 existing.Name = parts[1];
                                 existing.HostName = f?.Name ?? fromName;
+                                if (!string.IsNullOrEmpty(fixId)) existing.FixId = fixId;
                                 if (parts.Length > 2 && int.TryParse(parts[2], out var n2)) existing.Players = n2;
                             }
                             RoomsChanged?.Invoke();

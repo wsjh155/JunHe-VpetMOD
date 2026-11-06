@@ -874,6 +874,7 @@ namespace VPet.Plugin.OnlineInteraction
                         discovered.Add(new
                         {
                             lobbyId = r.Id.ToString(),
+                            fixId = r.FixId ?? "",
                             hostName = r.HostName ?? "",
                             petName = r.Name ?? "",
                             hostSteam = r.HostId != 0 ? r.HostId.ToString() : "",
