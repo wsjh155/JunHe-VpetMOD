@@ -210,6 +210,84 @@ public class OnlineInteraction : MainPlugin
         catch { return ""; }
     }
 
+    /// <summary>
+    /// 跨线程安全的固定 ID 读取。
+    /// WPF 的 TextBox.Text 是依赖属性, 只能在持有它的 UI 线程访问,
+    /// 云桥的 /state 由 TcpListener 后台线程处理, 直接读会抛
+    /// "调用线程无法访问此对象" 并被吞成空串 —— 这就是网页一直显示
+    /// 「固定 ID 加载中…」而 mod 面板正常的真正原因。
+    /// 这里派发到 UI 线程读, 带 800ms 超时避免和 UI 互相等待。
+    /// </summary>
+    internal static string GetFixedIdSafe(IMainWindow mw)
+    {
+        if (mw == null) return "";
+        try
+        {
+            var disp = (mw as System.Windows.Threading.DispatcherObject)?.Dispatcher;
+            if (disp == null) return GetFixedId(mw);
+            if (disp.CheckAccess())
+            {
+                var direct = GetFixedId(mw);
+                if (!string.IsNullOrEmpty(direct)) _lastFixId = direct;
+                return string.IsNullOrEmpty(direct) ? _lastFixId : direct;
+            }
+            string got = null;
+            try
+            {
+                var op = disp.InvokeAsync(new Action(() => { got = GetFixedId(mw); }));
+                if (!op.Task.Wait(800)) return _lastFixId;
+            }
+            catch { return _lastFixId; }
+            if (!string.IsNullOrEmpty(got)) { _lastFixId = got; return got; }
+            return _lastFixId;   // 读不到就沿用上次读到的号, 不要闪成空
+        }
+        catch { return _lastFixId; }
+    }
+
+    private static string _lastFixId = "";
+
+    /// <summary>
+    /// 主动向游戏要一次固定 ID —— 等价于点访客表窗口里的「刷新」按钮
+    /// (内部就是 GetVPetRoom("SteamRoomReset", 0, 当前大厅号)), 成功后 lbLFix 会被填上。
+    /// 必须在后台线程调用: 内部 await 需要线程池上下文。
+    /// </summary>
+    internal static void RequestFixedIdAsync(IMainWindow mw, ulong lobbyId)
+    {
+        try
+        {
+            if (mw == null || lobbyId == 0) return;
+            var m = mw.GetType().GetMethod("GetVPetRoom", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (m == null) return;
+            Task.Run(() =>
+            {
+                try
+                {
+                    var r = m.Invoke(mw, new object[] { "SteamRoomReset", 0, lobbyId });
+                    (r as Task<string>)?.GetAwaiter().GetResult();
+                }
+                catch { }
+            });
+        }
+        catch { }
+    }
+
+    /// <summary>访客表窗口记录的房主 SteamID (接口不存在时返回 0)</summary>
+    internal static ulong GetVisitorTableHostId(IMainWindow mw)
+    {
+        try
+        {
+            var field = mw.GetType().GetField("winMutiPlayer", BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
+            var cur = field?.GetValue(mw);
+            if (cur == null) return 0;
+            var p = cur.GetType().GetProperty("HostID", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (p == null) return 0;
+            var v = p.GetValue(cur);
+            if (v is ulong u) return u;
+            return Convert.ToUInt64(v ?? 0UL);
+        }
+        catch { return 0; }
+    }
+
     /// <summary>当前访客表是不是我自己开的 (null=读不到)</summary>
     internal static bool? GetVisitorTableIsHost(IMainWindow mw)
     {
@@ -793,6 +871,27 @@ public class OnlineInteraction : MainPlugin
         return friend?.Name ?? friendId.ToString();
     }
 
+    /// <summary>
+    /// 目标玩家的显示名: 在线好友 → 联机历史/桌宠好友 → Steam 好友 → id。
+    /// 用于「不要求对方在同一个房间」的定向发送 (打招呼/互动/投喂/红包)。
+    /// </summary>
+    internal string TargetName(ulong id)
+    {
+        try
+        {
+            var f = _mpWin?.Friends?.FirstOrDefault(x => x.FriendID == id);
+            if (f != null && !string.IsNullOrEmpty(f.Name)) return f.Name;
+        }
+        catch { }
+        try
+        {
+            var n = Lobby?.GetContactName(id);
+            if (!string.IsNullOrEmpty(n)) return n;
+        }
+        catch { }
+        return id.ToString();
+    }
+
     // ==================== 共享: 互动应用 (访客表/大厅两条通道共用) ====================
 
     internal void ApplyInteract(string senderName, int interactKind)
@@ -914,21 +1013,17 @@ public class OnlineInteraction : MainPlugin
             Log("向大家打招呼: " + message);
             return;
         }
-        IMPFriend friend = _mpWin.Friends?.FirstOrDefault(f => f.FriendID == friendId);
-        if (friend == null)
-        {
-            Log("好友不存在");
-            return;
-        }
+        // 不再要求对方此刻在同一个访客表里: 桌宠好友 / 联机历史 里的人也可以直接发 P2P
+        string toName = TargetName(friendId.Value);
         var content2 = new MPMessage.Chat
         {
             Content = "[GREET] " + message,
             ChatType = MPMessage.Chat.Type.Private,
             SendName = MW.Core.Save.Name,
-            ToName = friend.Name
+            ToName = toName
         };
         _mpWin.SendMessage(friendId.Value, MakeMPMsg(1, content2));
-        Log("向 " + friend.Name + " 打招呼: " + message);
+        Log("向 " + toName + " 打招呼: " + message);
     }
 
     public void SendRedPacket(ulong? friendId, double amount)
@@ -1034,14 +1129,14 @@ public class OnlineInteraction : MainPlugin
             Log("未连接到服务器");
             return;
         }
-        IMPFriend friend = (!friendId.HasValue) ? null : _mpWin.Friends?.FirstOrDefault(f => f.FriendID == friendId);
-        if (friend == null)
+        // 不要求在同一个访客表里: 好友 / 联机历史 里的人都能收到
+        if (!friendId.HasValue || friendId.Value == 0)
         {
-            Log("好友不存在");
+            Log("请先选择一个目标");
             return;
         }
-        _mpWin.SendMessage(friend.FriendID, MakeMPMsg<MPMessage.Interact>(3, kind));
-        Log("对 " + friend.Name + GetInteractName(kind));
+        _mpWin.SendMessage(friendId.Value, MakeMPMsg<MPMessage.Interact>(3, kind));
+        Log("对 " + TargetName(friendId.Value) + GetInteractName(kind));
     }
 
     // ==================== 通用工具 ====================

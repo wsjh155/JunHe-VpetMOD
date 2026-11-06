@@ -37,7 +37,8 @@ public class FriendEntry
     public bool PlayingThisGame;
     public bool InVisitorTable; // 在游戏自带访客表中
     public bool IsSteamFriend;  // 是Steam好友
-    public bool IsBuddy;        // 桌宠好友(手动添加)
+    public bool IsBuddy;        // 桌宠好友 = 双向(双方都加过对方)
+    public bool BuddyPending;   // 我加了他, 他还没加我 (单向, 不算好友)
     public bool FromHistory;    // 仅来自联机历史
     public bool IsModUser;
     public long LastSeen;       // 上次联机时间(unix秒)
@@ -51,7 +52,10 @@ public class ContactEntry
     public ulong Id;
     public string Name = "";
     public long LastSeen;
-    public bool Buddy; // 桌宠好友
+    public bool Buddy;      // 我把他加为桌宠好友(单向, 只代表我的意愿)
+    public bool BuddyBack;  // 他也把我加为好友(经 P2P 握手确认)
+    /// <summary>双向好友: 双方都加过对方, 才允许出现在「桌宠好友」页</summary>
+    public bool Mutual => Buddy && BuddyBack;
 }
 
 /// <summary>房间成员</summary>
@@ -82,6 +86,7 @@ public class SteamLobbyService : IDisposable
     public const int MSGTYPE_MOD_PRESENT = 112;  // 探测: 对方是否装有本mod
     public const int MSGTYPE_HUB_REGISTER = 113; // 客户端→hub: 报到/心跳 (内容=lobbyId|name)
     public const int MSGTYPE_HUB_REGISTRY = 114; // hub→客户端: 在线访客表注册表
+    public const int MSGTYPE_BUDDY = 115;        // 好友握手 (内容: ADD / DEL / STATE|0|1)
 
     private const string DATA_TAG = "vpoi";          // 本mod房间标记
     private const string DATA_NAME = "vpoi_name";
@@ -157,7 +162,8 @@ public class SteamLobbyService : IDisposable
                         Id = id,
                         Name = p.Length > 1 && p[1] != "" ? p[1] : id.ToString(),
                         LastSeen = p.Length > 2 && long.TryParse(p[2], out var ts) ? ts : 0,
-                        Buddy = p.Length > 3 && p[3] == "1"
+                        Buddy = p.Length > 3 && p[3] == "1",
+                        BuddyBack = p.Length > 4 && p[4] == "1"
                     });
                 }
             }
@@ -173,7 +179,7 @@ public class SteamLobbyService : IDisposable
             data = string.Join(";", Contacts
                 .OrderByDescending(c => c.LastSeen)
                 .Take(300)
-                .Select(c => $"{c.Id}|{c.Name.Replace("|", "/").Replace(";", ",")}|{c.LastSeen}|{(c.Buddy ? "1" : "0")}"));
+                .Select(c => $"{c.Id}|{c.Name.Replace("|", "/").Replace(";", ",")}|{c.LastSeen}|{(c.Buddy ? "1" : "0")}|{(c.BuddyBack ? "1" : "0")}"));
         }
         Ui(() =>
         {
@@ -347,13 +353,15 @@ public class SteamLobbyService : IDisposable
         var msg = new MPMessage { Type = MSGTYPE_HUB_REGISTER };
         // 内容: lobbyId|名字|固定ID —— 固定ID 由房主自己带出来, 别人就不用再猜了
         string myFix = "";
-        if (myLobby != 0) { try { myFix = OnlineInteraction.GetFixedId(_plugin.MW) ?? ""; } catch { } }
+        if (myLobby != 0) { try { myFix = OnlineInteraction.GetFixedIdSafe(_plugin.MW) ?? ""; } catch { } }
         msg.SetContent(myLobby + "|" + SelfName + "|" + myFix);
         foreach (var pid in GetKnownPeers())
         {
             if (pid == SelfId) continue;
             try { SendP2P(pid, msg); } catch { }
         }
+        // 顺手把还没被确认的加好友请求补发一遍 (对方可能刚上线)
+        try { ResendBuddyRequests(); } catch { }
     }
 
     /// <summary>本机已知的对端集合: 中心服务器(根管理员) + 在线Steam好友 + 已知mod用户</summary>
@@ -556,14 +564,16 @@ public class SteamLobbyService : IDisposable
         if (changed) Ui(() => FriendsChanged?.Invoke());
     }
 
-    /// <summary>添加桌宠好友 (mod内好友, 不依赖Steam好友关系)</summary>
+    /// <summary>添加桌宠好友 (需要对方也加你才会出现在「桌宠好友」页)</summary>
     public void AddBuddy(ulong id, string name = "")
     {
         RecordContact(id, string.IsNullOrEmpty(name) ? id.ToString() : name, buddy: true);
         SaveContacts();
+        // 告诉对方「我加了你」; 对方在线的话会回自己的状态, 双向成立才真正成为好友
+        SendBuddyState(id, "ADD");
         Ui(() =>
         {
-            Notify?.Invoke($"已添加桌宠好友: {name} ({id})");
+            Notify?.Invoke($"已发送好友请求: {(string.IsNullOrEmpty(name) ? id.ToString() : name)}（对方也加你之后才会显示在桌宠好友）");
             RefreshFriends();
         });
     }
@@ -576,11 +586,100 @@ public class SteamLobbyService : IDisposable
             Contacts.RemoveAll(c => c.Id == id);
         }
         SaveContacts();
+        SendBuddyState(id, "DEL");
         Ui(() =>
         {
             Notify?.Invoke("已移除: " + id);
             RefreshFriends();
         });
+    }
+
+    // ---------- 桌宠好友握手 (双向才成立) ----------
+
+    private long _lastBuddyResend;
+
+    private bool IsBuddyOf(ulong id)
+    {
+        lock (_contactLock) return Contacts.Any(c => c.Id == id && c.Buddy);
+    }
+
+    /// <summary>发一条好友握手消息给指定玩家 (ADD/DEL/STATE|0|1)。
+    /// SendMessage 内部就是 SteamNetworking.SendP2PPacket, 不要求对方在同一个大厅里。</summary>
+    private void SendBuddyState(ulong to, string what)
+    {
+        if (to == 0 || to == SelfId) return;
+        try
+        {
+            var msg = new MPMessage { Type = MSGTYPE_BUDDY };
+            msg.SetContent(what);
+            SendP2P(to, msg);
+        }
+        catch { }
+    }
+
+    /// <summary>把还没被确认的加好友请求定期重发一遍(对方当时可能不在线)</summary>
+    private void ResendBuddyRequests()
+    {
+        long now = NowUnix();
+        if (now - _lastBuddyResend < 60) return;
+        _lastBuddyResend = now;
+        List<ulong> pend;
+        lock (_contactLock) pend = Contacts.Where(c => c.Buddy && !c.BuddyBack).Select(c => c.Id).ToList();
+        foreach (var id in pend) SendBuddyState(id, "ADD");
+    }
+
+    /// <summary>记录「对方是否把我加为好友」(由对方的 STATE/ADD/DEL 决定)</summary>
+    private void SetBuddyBack(ulong id, bool v, string name)
+    {
+        if (id == 0 || id == SelfId) return;
+        bool changed = false;
+        lock (_contactLock)
+        {
+            var c = Contacts.FirstOrDefault(x => x.Id == id);
+            if (c == null)
+            {
+                if (v)
+                {
+                    Contacts.Add(new ContactEntry
+                    {
+                        Id = id,
+                        Name = string.IsNullOrEmpty(name) ? id.ToString() : name,
+                        LastSeen = NowUnix(),
+                        BuddyBack = true
+                    });
+                    changed = true;
+                }
+            }
+            else if (c.BuddyBack != v) { c.BuddyBack = v; changed = true; }
+        }
+        if (!changed) return;
+        SaveContacts();
+        Ui(() =>
+        {
+            FriendsChanged?.Invoke();
+            RefreshFriends();
+        });
+    }
+
+    /// <summary>联机历史里某个玩家的名字 (联系人表 → Steam → id)</summary>
+    public string GetContactName(ulong id)
+    {
+        try
+        {
+            lock (_contactLock)
+            {
+                var c = Contacts.FirstOrDefault(x => x.Id == id);
+                if (c != null && !string.IsNullOrEmpty(c.Name) && c.Name != id.ToString()) return c.Name;
+            }
+        }
+        catch { }
+        try
+        {
+            var n = new Friend(id).Name;
+            if (!string.IsNullOrEmpty(n)) return n;
+        }
+        catch { }
+        return id.ToString();
     }
     // ============ 联机历史 / 好友查询 ============
 
@@ -593,10 +692,22 @@ public class SteamLobbyService : IDisposable
         }
     }
 
-    /// <summary>当前桌宠好友 (IsBuddy)</summary>
+    /// <summary>桌宠好友: 只包含「双方都加过对方」的人</summary>
     public List<FriendEntry> GetBuddies()
     {
         return Friends.Where(f => f.IsBuddy).ToList();
+    }
+
+    /// <summary>我加了他、但他还没加我的人 (等对方同意)</summary>
+    public List<ContactEntry> GetPendingBuddies()
+    {
+        lock (_contactLock) return Contacts.Where(c => c.Buddy && !c.BuddyBack).OrderByDescending(c => c.LastSeen).ToList();
+    }
+
+    /// <summary>他加了我、但我还没加他的人 (等我同意)</summary>
+    public List<ContactEntry> GetIncomingBuddies()
+    {
+        lock (_contactLock) return Contacts.Where(c => !c.Buddy && c.BuddyBack).OrderByDescending(c => c.LastSeen).ToList();
     }
 
     public bool IsInRoom => _lobby.Id.Value != 0;
@@ -731,6 +842,29 @@ public class SteamLobbyService : IDisposable
                     break;
                 }
 
+            case MSGTYPE_BUDDY: // 好友握手: 双方都加过对方才算好友
+                {
+                    var bp = (msg.GetContent() ?? "").Trim().Split('|');
+                    string act = bp.Length > 0 ? bp[0].Trim().ToUpperInvariant() : "";
+                    if (act == "STATE")
+                    {
+                        bool theyAddedMe = bp.Length > 1 && bp[1].Trim() == "1";
+                        SetBuddyBack(from, theyAddedMe, fromName);
+                    }
+                    else if (act == "ADD")
+                    {
+                        // 对方把我加为好友了 → 记下「他也加了我」, 并告诉他我的状态
+                        SetBuddyBack(from, true, fromName);
+                        SendBuddyState(from, "STATE|" + (IsBuddyOf(from) ? "1" : "0"));
+                    }
+                    else if (act == "DEL")
+                    {
+                        SetBuddyBack(from, false, fromName);
+                        SendBuddyState(from, "STATE|" + (IsBuddyOf(from) ? "1" : "0"));
+                    }
+                    break;
+                }
+
             case MSGTYPE_HUB_REGISTER: // 报到/心跳: 每个微型中心都处理并转发
                 {
                     var parts = (msg.GetContent() ?? "").Split('|');
@@ -781,7 +915,7 @@ public class SteamLobbyService : IDisposable
                     {
                         var reply = new MPMessage { Type = MSGTYPE_ROOM_REPLY };
                         string myFix = "";
-                        try { myFix = OnlineInteraction.GetFixedId(_plugin.MW) ?? ""; } catch { }
+                        try { myFix = OnlineInteraction.GetFixedIdSafe(_plugin.MW) ?? ""; } catch { }
                         reply.SetContent($"{vt.Value.lobbyId}|{SelfName}的访客表|{vt.Value.members}|member|{myFix}");
                         SendP2P(from, reply);
                     }
@@ -1193,7 +1327,8 @@ public class SteamLobbyService : IDisposable
                 PlayingThisGame = f.IsPlayingThisGame,
                 InVisitorTable = visitorIds.Contains(f.Id.Value),
                 IsSteamFriend = true,
-                IsBuddy = ct?.Buddy ?? false,
+                IsBuddy = ct != null && ct.Mutual,
+                BuddyPending = ct != null && ct.Buddy && !ct.BuddyBack,
                 IsModUser = _modFriends.Contains(f.Id.Value),
                 LastSeen = ct?.LastSeen ?? 0,
                 RoomId = old?.RoomId,
@@ -1211,7 +1346,8 @@ public class SteamLobbyService : IDisposable
                 Online = false,
                 InVisitorTable = visitorIds.Contains(ct.Id),
                 IsSteamFriend = false,
-                IsBuddy = ct.Buddy,
+                IsBuddy = ct.Mutual,
+                BuddyPending = ct.Buddy && !ct.BuddyBack,
                 FromHistory = true,
                 LastSeen = ct.LastSeen
             });

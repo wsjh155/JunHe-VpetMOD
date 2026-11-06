@@ -47,6 +47,9 @@ namespace VPet.Plugin.OnlineInteraction
         /// <summary>可见窗口的保护期截止时刻(UTC ticks)。启动/验证期间看门狗必须让路,
         /// 否则它会在空档里抢先拉起无头实例把配置目录锁走。</summary>
         private long _uiHoldUntilTicks;
+        /// <summary>上次向游戏索取固定 ID 的时刻 / 对应的大厅号, 用于限频</summary>
+        private long _fixReqAt;
+        private ulong _fixReqLobby;
 
         /// <summary>网页端推送过来的云端房间列表(仅用于 mod 内「云端房间」页展示+加入)</summary>
         public List<CloudRoom> Rooms { get; private set; } = new List<CloudRoom>();
@@ -826,15 +829,21 @@ namespace VPet.Plugin.OnlineInteraction
                             if (lid != 0)
                             {
                                 lobbyId = lid.ToString();
-                                var ownerObj = lb.GetType().GetProperty("Owner")?.GetValue(lb);
-                                var ownerIdObj = ownerObj?.GetType().GetProperty("Id")?.GetValue(ownerObj);
-                                ulong owner = OnlineInteraction.GetSteamIdValue(ownerIdObj);
-                                hosting = owner != 0 && owner == SteamClient.SteamId.Value;
-                                hostSteam = owner != 0 ? owner.ToString() : "";
+                                // 房主判定走访客表窗口自己的 IsHost 属性。
+                                // 原来的 Lobby.Owner 是 Facepunch 的 Friend 结构体, 没有 Id 属性,
+                                // 反射取不到值 → hosting 永远 false, 房主名也会错。
+                                var isHost = OnlineInteraction.GetVisitorTableIsHost(_plugin.MW);
+                                ulong owner = OnlineInteraction.GetVisitorTableHostId(_plugin.MW);
+                                if (isHost.HasValue) hosting = isHost.Value;
                                 if (owner != 0)
                                 {
-                                    // 成员的视角要显示「房主是谁」, 自己当房主时才用自己
-                                    try { var hn = new Friend(owner).Name; if (!string.IsNullOrEmpty(hn)) hostName = hn; } catch { }
+                                    hostSteam = owner.ToString();
+                                    if (!hosting)
+                                    {
+                                        // 成员的视角要显示「房主是谁」
+                                        try { var hn = new Friend(owner).Name; if (!string.IsNullOrEmpty(hn)) hostName = hn; } catch { }
+                                    }
+                                    else hostName = string.IsNullOrEmpty(SteamClient.Name) ? petName : SteamClient.Name;
                                 }
                                 try
                                 {
@@ -846,8 +855,21 @@ namespace VPet.Plugin.OnlineInteraction
                         }
                     }
                 }
-                // 固定 ID: 游戏访客表窗口里显示的短号 (V255082), 由 report.exlb.net 分配
-                fixId = OnlineInteraction.GetFixedId(_plugin.MW);
+                // 固定 ID: 游戏访客表窗口里显示的短号 (V255082), 由 report.exlb.net 分配。
+                // 必须在 UI 线程读 (WPF 控件跨线程访问会抛异常, 老代码在这里静默返回空串,
+                // 于是网页永远显示「固定 ID 加载中…」但 mod 面板里却正常)。
+                fixId = OnlineInteraction.GetFixedIdSafe(_plugin.MW);
+                // 房主自己却还没有号: 主动向游戏要一次 (约等于点访客表里的刷新按钮)。
+                // 同一个大厅号 10 分钟最多要一次, 避免 /state 高频轮询反复打接口。
+                if (hosting && string.IsNullOrEmpty(fixId) && ulong.TryParse(lobbyId, out var myLid) && myLid != 0)
+                {
+                    long nowMs = Environment.TickCount64;
+                    if (_fixReqLobby != myLid || nowMs - _fixReqAt > 600000)
+                    {
+                        _fixReqLobby = myLid; _fixReqAt = nowMs;
+                        OnlineInteraction.RequestFixedIdAsync(_plugin.MW, myLid);
+                    }
+                }
                 if (string.IsNullOrEmpty(hostName)) hostName = hosting ? (string.IsNullOrEmpty(SteamClient.Name) ? petName : SteamClient.Name) : petName;
             }
             catch (Exception ex) { Log("GetState 异常: " + ex); }

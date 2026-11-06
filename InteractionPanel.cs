@@ -352,7 +352,7 @@ public class InteractionPanel : UserControl
 
         // 好友列表卡片
         var friendCard = new StackPanel();
-        friendCard.Children.Add(SectionTitle("在线好友"));
+        friendCard.Children.Add(SectionTitle("可发送对象"));
         _friendList = CleanList(100);
         _friendList.Loaded += (_, _) => RefreshFriendList();
         try { _mpWin.OnMemberJoined += delegate { Dispatcher.Invoke((Action)RefreshFriendList); }; } catch { }
@@ -360,7 +360,7 @@ public class InteractionPanel : UserControl
         friendCard.Children.Add(_friendList);
         friendCard.Children.Add(new TextBlock
         {
-            Text = "提示: 未选中好友则对所有人操作",
+            Text = "列表中包含在线成员、桌宠好友和联机历史。后两类不需要在同一个访客表里, 会直接通过 Steam P2P 发送。未选中则对当前房间所有人操作。",
             Foreground = MutedBrush,
             FontSize = 12,
             Margin = new Thickness(0, 4, 0, 0),
@@ -817,6 +817,14 @@ public class InteractionPanel : UserControl
         public bool FriendsOnly;   // 仅限好友房: 加不进去不代表房间关了, 不能下架
     }
 
+    /// <summary>互动页可选的目标 (在线成员 / 桌宠好友 / 联机历史)</summary>
+    private class TargetItem
+    {
+        public ulong Id;
+        public string Name = "";
+        public string Where = "";
+    }
+
     /// <summary>房间列表统一由 RefreshRoomList 渲染(两个来源合并), 这里只做兼容入口</summary>
     private void RenderCloudRooms()
     {
@@ -827,19 +835,55 @@ public class InteractionPanel : UserControl
     {
         if (_friendList == null) return;
         _friendList.Items.Clear();
-        if (_mpWin.Friends == null || !_mpWin.Friends.Any())
+        var seen = new HashSet<ulong>();
+        // 1) 当前访客表里在线的人
+        foreach (IMPFriend friend in _mpWin.Friends ?? Enumerable.Empty<IMPFriend>())
         {
-            _friendList.Items.Add("暂无在线好友");
-            return;
-        }
-        foreach (IMPFriend friend in _mpWin.Friends)
-        {
-            _friendList.Items.Add(new ListBoxItem
+            if (!seen.Add(friend.FriendID)) continue;
+            _friendList.Items.Add(MakeTargetRow(new TargetItem
             {
-                Content = friend.Name + " (ID:" + friend.FriendID + ")",
-                Tag = friend
-            });
+                Id = friend.FriendID,
+                Name = friend.Name,
+                Where = "在线"
+            }));
         }
+        var lobby = _plugin.Lobby;
+        // 2) 桌宠好友 (双向好友, 可以不在同一张访客表里)
+        if (lobby != null)
+        {
+            foreach (var b in lobby.GetBuddies())
+            {
+                if (!seen.Add(b.Id)) continue;
+                _friendList.Items.Add(MakeTargetRow(new TargetItem
+                {
+                    Id = b.Id,
+                    Name = b.Name,
+                    Where = b.Online ? "好友·在线" : "好友·离线"
+                }));
+            }
+            // 3) 联机历史 (最近 30 位) —— 通过 Steam P2P 直接送达, 不需要同房间
+            foreach (var c in lobby.GetHistory().Take(30))
+            {
+                if (!seen.Add(c.Id)) continue;
+                _friendList.Items.Add(MakeTargetRow(new TargetItem
+                {
+                    Id = c.Id,
+                    Name = string.IsNullOrEmpty(c.Name) ? c.Id.ToString() : c.Name,
+                    Where = "历史"
+                }));
+            }
+        }
+        if (_friendList.Items.Count == 0) _friendList.Items.Add("暂无可发送对象");
+    }
+
+    /// <summary>互动页的目标行: 名字 + 来源标记 (在线 / 好友 / 历史)</summary>
+    private ListBoxItem MakeTargetRow(TargetItem t)
+    {
+        return new ListBoxItem
+        {
+            Content = t.Name + "  (ID:" + t.Id + ") · " + t.Where,
+            Tag = t
+        };
     }
 
     internal void RefreshFoodList()
@@ -867,8 +911,11 @@ public class InteractionPanel : UserControl
 
     private ulong? GetSelectedFriendId()
     {
-        if (_friendList?.SelectedItem is ListBoxItem { Tag: IMPFriend f })
-            return f.FriendID;
+        if (_friendList?.SelectedItem is ListBoxItem li)
+        {
+            if (li.Tag is TargetItem t) return t.Id;
+            if (li.Tag is IMPFriend f) return f.FriendID;
+        }
         return null;
     }
     // v2 联机大厅 (桌宠访客表)
@@ -1238,7 +1285,7 @@ public class InteractionPanel : UserControl
         sp.Children.Add(_buddyList);
         sp.Children.Add(new TextBlock
         {
-            Text = "桌宠好友独立于 Steam 好友, 长期保留。在「Steam好友」或「联机历史」中点击「加为桌宠好友」即可添加。",
+            Text = "桌宠好友是双向的: 你加对方、对方也加你, 才会出现在这里。在「Steam好友」或「联机历史」中点击「加为桌宠好友」发起申请, 对方那边点一次同意即可。",
             Foreground = MutedBrush, FontSize = 12, TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 6, 0, 0)
         });
@@ -1397,7 +1444,20 @@ public class InteractionPanel : UserControl
         DockPanel.SetDock(nameTb, Dock.Left);
         dock.Children.Add(nameTb);
         var panel = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
-        panel.Children.Add(SmallBtn("加为桌宠好友", () => _plugin.Lobby?.AddBuddy(c.Id, c.Name)));
+        if (c.Mutual)
+        {
+            panel.Children.Add(SmallBtn("打招呼", () => _plugin.SendGreet(c.Id, "你好呀~")));
+            panel.Children.Add(SmallBtn("取消好友", () => _plugin.Lobby?.RemoveBuddy(c.Id)));
+        }
+        else if (c.Buddy)
+        {
+            panel.Children.Add(SmallBtn("撤回申请", () => _plugin.Lobby?.RemoveBuddy(c.Id)));
+        }
+        else
+        {
+            panel.Children.Add(SmallBtn("打招呼", () => _plugin.SendGreet(c.Id, "你好呀~")));
+            panel.Children.Add(SmallBtn("加为桌宠好友", () => _plugin.Lobby?.AddBuddy(c.Id, c.Name)));
+        }
         dock.Children.Add(panel);
         item.Content = dock;
         item.Tag = c;
@@ -1408,9 +1468,78 @@ public class InteractionPanel : UserControl
     {
         if (_buddyList == null) return;
         _buddyList.Items.Clear();
-        var buddies = _plugin.Lobby?.GetBuddies() ?? new List<FriendEntry>();
-        if (buddies.Count == 0) { _buddyList.Items.Add("暂无桌宠好友"); return; }
-        foreach (var f in buddies) _buddyList.Items.Add(MakeBuddyRow(f));
+        var lobby = _plugin.Lobby;
+        var buddies = lobby?.GetBuddies() ?? new List<FriendEntry>();
+        if (buddies.Count > 0)
+        {
+            foreach (var f in buddies) _buddyList.Items.Add(MakeBuddyRow(f));
+        }
+        else
+        {
+            _buddyList.Items.Add("暂无桌宠好友（要求双方都加对方）");
+        }
+
+        // 对方加了我、等我同意
+        var incoming = lobby?.GetIncomingBuddies() ?? new List<ContactEntry>();
+        if (incoming.Count > 0)
+        {
+            _buddyList.Items.Add(new TextBlock
+            {
+                Text = "对方加了你 (" + incoming.Count + ") —— 你也加他之后就互为好友",
+                Foreground = MutedBrush, FontSize = 12,
+                Margin = new Thickness(0, 10, 0, 2), TextWrapping = TextWrapping.Wrap
+            });
+            foreach (var c in incoming)
+            {
+                var item = new ListBoxItem();
+                var dock = new DockPanel { LastChildFill = true };
+                var tb = new TextBlock
+                {
+                    Text = (string.IsNullOrEmpty(c.Name) ? c.Id.ToString() : c.Name) + "  (对方已加你)",
+                    VerticalAlignment = VerticalAlignment.Center, FontSize = 13, Foreground = TextBrush
+                };
+                DockPanel.SetDock(tb, Dock.Left);
+                dock.Children.Add(tb);
+                var panel = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+                panel.Children.Add(SmallBtn("同意", () => _plugin.Lobby?.AddBuddy(c.Id, c.Name)));
+                dock.Children.Add(panel);
+                item.Content = dock;
+                item.Tag = c;
+                _buddyList.Items.Add(item);
+            }
+        }
+
+        // 单向的加好友请求: 对方还没加我, 不算好友, 单独列出来
+        var pending = lobby?.GetPendingBuddies() ?? new List<ContactEntry>();
+        if (pending.Count > 0)
+        {
+            _buddyList.Items.Add(new TextBlock
+            {
+                Text = "等待对方同意 (" + pending.Count + ") —— 对方也加你之后才会变成好友",
+                Foreground = MutedBrush, FontSize = 12,
+                Margin = new Thickness(0, 10, 0, 2), TextWrapping = TextWrapping.Wrap
+            });
+            foreach (var c in pending) _buddyList.Items.Add(MakePendingBuddyRow(c));
+        }
+    }
+
+    private ListBoxItem MakePendingBuddyRow(ContactEntry c)
+    {
+        var item = new ListBoxItem();
+        var dock = new DockPanel { LastChildFill = true };
+        var tb = new TextBlock
+        {
+            Text = (string.IsNullOrEmpty(c.Name) ? c.Id.ToString() : c.Name) + "  (已申请, 等待对方同意)",
+            VerticalAlignment = VerticalAlignment.Center, FontSize = 13, Foreground = MutedBrush
+        };
+        DockPanel.SetDock(tb, Dock.Left);
+        dock.Children.Add(tb);
+        var panel = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
+        panel.Children.Add(SmallBtn("撤回", () => _plugin.Lobby?.RemoveBuddy(c.Id)));
+        dock.Children.Add(panel);
+        item.Content = dock;
+        item.Tag = c;
+        return item;
     }
 
     private void RefreshSteamList()
