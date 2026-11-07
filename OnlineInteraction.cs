@@ -871,27 +871,6 @@ public class OnlineInteraction : MainPlugin
         return friend?.Name ?? friendId.ToString();
     }
 
-    /// <summary>
-    /// 目标玩家的显示名: 在线好友 → 联机历史/桌宠好友 → Steam 好友 → id。
-    /// 用于「不要求对方在同一个房间」的定向发送 (打招呼/互动/投喂/红包)。
-    /// </summary>
-    internal string TargetName(ulong id)
-    {
-        try
-        {
-            var f = _mpWin?.Friends?.FirstOrDefault(x => x.FriendID == id);
-            if (f != null && !string.IsNullOrEmpty(f.Name)) return f.Name;
-        }
-        catch { }
-        try
-        {
-            var n = Lobby?.GetContactName(id);
-            if (!string.IsNullOrEmpty(n)) return n;
-        }
-        catch { }
-        return id.ToString();
-    }
-
     // ==================== 共享: 互动应用 (访客表/大厅两条通道共用) ====================
 
     internal void ApplyInteract(string senderName, int interactKind)
@@ -1013,8 +992,14 @@ public class OnlineInteraction : MainPlugin
             Log("向大家打招呼: " + message);
             return;
         }
-        // 不再要求对方此刻在同一个访客表里: 桌宠好友 / 联机历史 里的人也可以直接发 P2P
-        string toName = TargetName(friendId.Value);
+        // 只允许发给当前在线好友 (同房间)
+        IMPFriend target = _mpWin.Friends?.FirstOrDefault(f => f.FriendID == friendId.Value);
+        if (target == null)
+        {
+            Log("好友不在线, 无法发送");
+            return;
+        }
+        string toName = target.Name;
         var content2 = new MPMessage.Chat
         {
             Content = "[GREET] " + message,
@@ -1044,6 +1029,13 @@ public class OnlineInteraction : MainPlugin
             Log($"单次最多 {maxAmount:F0} (Lv.{MW.Core.Save.Level})");
             return;
         }
+        // 只允许发给当前在线好友 (同房间)
+        IMPFriend one = null;
+        if (friendId.HasValue && friendId.Value != 0)
+        {
+            one = _mpWin.Friends?.FirstOrDefault(f => f.FriendID == friendId.Value);
+            if (one == null) { Log("好友不在线, 无法发送"); return; }
+        }
         int count = _mpWin.Friends?.Count() ?? 0;
         double total = friendId.HasValue ? amount : amount * count;
         if (MW.Core.Save.Money < total)
@@ -1069,9 +1061,8 @@ public class OnlineInteraction : MainPlugin
         }
         else
         {
-            IMPFriend target = _mpWin.Friends?.FirstOrDefault(f => f.FriendID == friendId);
             _mpWin.SendMessage(friendId.Value, msg);
-            Log($"给 {target?.Name ?? friendId.ToString()} 发红包 (-{amount:F0})");
+            Log($"给 {one?.Name ?? friendId.Value.ToString()} 发红包 (-{amount:F0})");
         }
     }
 
@@ -1088,6 +1079,13 @@ public class OnlineInteraction : MainPlugin
             return;
         }
         quantity = Math.Min(quantity, 99);
+        // 只允许发给当前在线好友 (同房间)
+        IMPFriend one = null;
+        if (friendId.HasValue && friendId.Value != 0)
+        {
+            one = _mpWin.Friends?.FirstOrDefault(f => f.FriendID == friendId.Value);
+            if (one == null) { Log("好友不在线, 无法发送"); return; }
+        }
         double cost = food.Price * quantity;
         int count = _mpWin.Friends?.Count() ?? 0;
         double total = friendId.HasValue ? cost : cost * count;
@@ -1116,9 +1114,8 @@ public class OnlineInteraction : MainPlugin
         }
         else
         {
-            IMPFriend target = _mpWin.Friends?.FirstOrDefault(f => f.FriendID == friendId);
             _mpWin.SendMessage(friendId.Value, msg);
-            Log($"给 {target?.Name ?? friendId.ToString()} 投喂: {food.Name} x{quantity} (-{cost:F0})");
+            Log($"给 {one?.Name ?? friendId.Value.ToString()} 投喂: {food.Name} x{quantity} (-{cost:F0})");
         }
     }
 
@@ -1129,14 +1126,20 @@ public class OnlineInteraction : MainPlugin
             Log("未连接到服务器");
             return;
         }
-        // 不要求在同一个访客表里: 好友 / 联机历史 里的人都能收到
+        // 只允许发给当前在线好友 (同房间)
         if (!friendId.HasValue || friendId.Value == 0)
         {
             Log("请先选择一个目标");
             return;
         }
+        IMPFriend target = _mpWin.Friends?.FirstOrDefault(f => f.FriendID == friendId.Value);
+        if (target == null)
+        {
+            Log("好友不在线, 无法发送");
+            return;
+        }
         _mpWin.SendMessage(friendId.Value, MakeMPMsg<MPMessage.Interact>(3, kind));
-        Log("对 " + TargetName(friendId.Value) + GetInteractName(kind));
+        Log("对 " + target.Name + GetInteractName(kind));
     }
 
     // ==================== 通用工具 ====================

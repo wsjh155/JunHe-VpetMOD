@@ -352,7 +352,7 @@ public class InteractionPanel : UserControl
 
         // 好友列表卡片
         var friendCard = new StackPanel();
-        friendCard.Children.Add(SectionTitle("可发送对象"));
+        friendCard.Children.Add(SectionTitle("在线好友"));
         _friendList = CleanList(100);
         _friendList.Loaded += (_, _) => RefreshFriendList();
         try { _mpWin.OnMemberJoined += delegate { Dispatcher.Invoke((Action)RefreshFriendList); }; } catch { }
@@ -360,7 +360,7 @@ public class InteractionPanel : UserControl
         friendCard.Children.Add(_friendList);
         friendCard.Children.Add(new TextBlock
         {
-            Text = "列表中包含在线成员、桌宠好友和联机历史。后两类不需要在同一个访客表里, 会直接通过 Steam P2P 发送。未选中则对当前房间所有人操作。",
+            Text = "只列出当前在同一个访客表里的在线好友, 未选中则对房间内所有人操作。",
             Foreground = MutedBrush,
             FontSize = 12,
             Margin = new Thickness(0, 4, 0, 0),
@@ -817,14 +817,6 @@ public class InteractionPanel : UserControl
         public bool FriendsOnly;   // 仅限好友房: 加不进去不代表房间关了, 不能下架
     }
 
-    /// <summary>互动页可选的目标 (在线成员 / 桌宠好友 / 联机历史)</summary>
-    private class TargetItem
-    {
-        public ulong Id;
-        public string Name = "";
-        public string Where = "";
-    }
-
     /// <summary>房间列表统一由 RefreshRoomList 渲染(两个来源合并), 这里只做兼容入口</summary>
     private void RenderCloudRooms()
     {
@@ -835,55 +827,19 @@ public class InteractionPanel : UserControl
     {
         if (_friendList == null) return;
         _friendList.Items.Clear();
-        var seen = new HashSet<ulong>();
-        // 1) 当前访客表里在线的人
-        foreach (IMPFriend friend in _mpWin.Friends ?? Enumerable.Empty<IMPFriend>())
+        if (_mpWin.Friends == null || !_mpWin.Friends.Any())
         {
-            if (!seen.Add(friend.FriendID)) continue;
-            _friendList.Items.Add(MakeTargetRow(new TargetItem
-            {
-                Id = friend.FriendID,
-                Name = friend.Name,
-                Where = "在线"
-            }));
+            _friendList.Items.Add("暂无在线好友");
+            return;
         }
-        var lobby = _plugin.Lobby;
-        // 2) 桌宠好友 (双向好友, 可以不在同一张访客表里)
-        if (lobby != null)
+        foreach (IMPFriend friend in _mpWin.Friends)
         {
-            foreach (var b in lobby.GetBuddies())
+            _friendList.Items.Add(new ListBoxItem
             {
-                if (!seen.Add(b.Id)) continue;
-                _friendList.Items.Add(MakeTargetRow(new TargetItem
-                {
-                    Id = b.Id,
-                    Name = b.Name,
-                    Where = b.Online ? "好友·在线" : "好友·离线"
-                }));
-            }
-            // 3) 联机历史 (最近 30 位) —— 通过 Steam P2P 直接送达, 不需要同房间
-            foreach (var c in lobby.GetHistory().Take(30))
-            {
-                if (!seen.Add(c.Id)) continue;
-                _friendList.Items.Add(MakeTargetRow(new TargetItem
-                {
-                    Id = c.Id,
-                    Name = string.IsNullOrEmpty(c.Name) ? c.Id.ToString() : c.Name,
-                    Where = "历史"
-                }));
-            }
+                Content = friend.Name + " (ID:" + friend.FriendID + ")",
+                Tag = friend
+            });
         }
-        if (_friendList.Items.Count == 0) _friendList.Items.Add("暂无可发送对象");
-    }
-
-    /// <summary>互动页的目标行: 名字 + 来源标记 (在线 / 好友 / 历史)</summary>
-    private ListBoxItem MakeTargetRow(TargetItem t)
-    {
-        return new ListBoxItem
-        {
-            Content = t.Name + "  (ID:" + t.Id + ") · " + t.Where,
-            Tag = t
-        };
     }
 
     internal void RefreshFoodList()
@@ -911,11 +867,8 @@ public class InteractionPanel : UserControl
 
     private ulong? GetSelectedFriendId()
     {
-        if (_friendList?.SelectedItem is ListBoxItem li)
-        {
-            if (li.Tag is TargetItem t) return t.Id;
-            if (li.Tag is IMPFriend f) return f.FriendID;
-        }
+        if (_friendList?.SelectedItem is ListBoxItem { Tag: IMPFriend f })
+            return f.FriendID;
         return null;
     }
     // v2 联机大厅 (桌宠访客表)
@@ -1446,7 +1399,6 @@ public class InteractionPanel : UserControl
         var panel = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right };
         if (c.Mutual)
         {
-            panel.Children.Add(SmallBtn("打招呼", () => _plugin.SendGreet(c.Id, "你好呀~")));
             panel.Children.Add(SmallBtn("取消好友", () => _plugin.Lobby?.RemoveBuddy(c.Id)));
         }
         else if (c.Buddy)
@@ -1455,7 +1407,6 @@ public class InteractionPanel : UserControl
         }
         else
         {
-            panel.Children.Add(SmallBtn("打招呼", () => _plugin.SendGreet(c.Id, "你好呀~")));
             panel.Children.Add(SmallBtn("加为桌宠好友", () => _plugin.Lobby?.AddBuddy(c.Id, c.Name)));
         }
         dock.Children.Add(panel);
