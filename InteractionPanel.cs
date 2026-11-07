@@ -817,6 +817,14 @@ public class InteractionPanel : UserControl
         public bool FriendsOnly;   // 仅限好友房: 加不进去不代表房间关了, 不能下架
     }
 
+    /// <summary>同一张桌子的两条记录留哪条: 当前所在 > P2P 实时发现 > 人数多</summary>
+    private static bool PreferRoom(MergedRoom a, MergedRoom b)
+    {
+        if (a.IsCurrent != b.IsCurrent) return a.IsCurrent;
+        if (a.FromP2P != b.FromP2P) return a.FromP2P;
+        return a.Players > b.Players;
+    }
+
     /// <summary>房间列表统一由 RefreshRoomList 渲染(两个来源合并), 这里只做兼容入口</summary>
     private void RenderCloudRooms()
     {
@@ -967,6 +975,20 @@ public class InteractionPanel : UserControl
                 m.FixId = cachedFix;
         }
         StartFixIdLookup(merged);
+
+        // 一个人同一时间只可能开一张访客表: 固定 ID 相同的必然是同一张桌子, 只留一条。
+        // 换房会换 Steam 大厅号, 光按大厅号去重会把「旧房间」和「新房间」一起列出来。
+        var byFix = new Dictionary<string, MergedRoom>(StringComparer.OrdinalIgnoreCase);
+        foreach (var m in merged.ToList())
+        {
+            if (string.IsNullOrEmpty(m.FixId)) continue;
+            if (!byFix.TryGetValue(m.FixId, out var keep)) { byFix[m.FixId] = m; continue; }
+            MergedRoom win = PreferRoom(m, keep) ? m : keep;
+            MergedRoom lose = ReferenceEquals(win, m) ? keep : m;
+            byFix[m.FixId] = win;
+            merged.Remove(lose);
+            byId.Remove(lose.LobbyId);
+        }
 
         // 当前所在排最前, 其次云端, 再按人数
         merged.Sort((a, b) =>
